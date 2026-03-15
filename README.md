@@ -25,10 +25,13 @@ Then start Codex through the local Azure proxy:
 codex-azure
 ```
 
-If you are on a remote machine, in plain SSH, or in a VS Code terminal, authenticate Azure CLI in that same terminal first:
+If the above command fails during Azure authnetication because you are on a remote machine, in plain SSH, or in a VS Code terminal, authenticate Azure CLI in that same terminal first and then rerun codex-azure:
 
 ```bash
+uv tool install azure-cli
+uv tool update-shell   # if needed, once
 az login --use-device-code
+codex-azure
 ```
 
 On first run, if these are not already configured, `codex-azure` prompts for them and stores them in its per-user platform config directory:
