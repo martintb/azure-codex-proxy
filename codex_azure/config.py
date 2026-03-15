@@ -1,5 +1,7 @@
 import json
 import os
+import secrets
+import stat
 from pathlib import Path
 
 import tomlkit
@@ -8,38 +10,81 @@ import tomlkit
 CONFIG_DIR = Path.home() / ".config" / "codex-azure"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 RESOURCE_KEY = "azure_openai_resource"
+DEPLOYMENT_KEY = "azure_openai_deployment"
+LOCAL_AUTH_TOKEN_KEY = "local_auth_token"
 CODEX_CONFIG_DIR = Path.home() / ".codex"
 CODEX_CONFIG_FILE = CODEX_CONFIG_DIR / "config.toml"
 CODEX_PROVIDER_NAME = "azure-openai-proxy"
-CODEX_MODEL_NAME = "gpt-5.4"
-CODEX_MODEL_ALIAS = "azure-openai-proxy"
+CODEX_MODEL_NAME = "azure-openai-proxy"
 CODEX_DUMMY_API_KEY_ENV = "CODEX_AZURE_OPENAI_DUMMY_API_KEY"
 CODEX_DUMMY_API_KEY_VALUE = "azure-openai-proxy"
+CODEX_LOCAL_AUTH_ENV = "CODEX_AZURE_PROXY_AUTH_TOKEN"
 DEFAULT_PROXY_BASE_URL = "http://127.0.0.1:43123/openai/v1"
-DEPLOYMENT_KEY = "azure_openai_deployment"
 DEFAULT_STREAM_IDLE_TIMEOUT_MS = 1800000
 DEFAULT_STREAM_MAX_RETRIES = 20
 DEFAULT_REQUEST_MAX_RETRIES = 8
+OWNER_ONLY_FILE_MODE = 0o600
+OWNER_ONLY_DIR_MODE = 0o700
+
+
+def _ensure_owner_only_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, OWNER_ONLY_DIR_MODE)
+    except PermissionError:
+        pass
+
+
+def _write_owner_only_file(path: Path, content: str) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(path, flags, OWNER_ONLY_FILE_MODE)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    try:
+        os.chmod(path, OWNER_ONLY_FILE_MODE)
+    except PermissionError:
+        pass
+
+
+def _assert_secure_file(path: Path) -> None:
+    if not path.exists():
+        return
+    stat_result = path.stat()
+    if stat_result.st_uid != os.getuid():
+        raise RuntimeError(f"Refusing to use insecure file not owned by current user: {path}")
+    if stat_result.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise RuntimeError(f"Refusing to use writable-by-others file: {path}")
 
 
 def _normalize_resource(value: str) -> str:
     normalized = value.strip().rstrip("/")
     if not normalized:
         raise ValueError("Azure OpenAI resource cannot be empty")
-    if not normalized.startswith("http://") and not normalized.startswith("https://"):
-        raise ValueError("Azure OpenAI resource must start with http:// or https://")
+    if not normalized.startswith("https://"):
+        raise ValueError("Azure OpenAI resource must start with https://")
+    host = normalized[len("https://") :].split("/", 1)[0].strip().lower()
+    if not host:
+        raise ValueError("Azure OpenAI resource must include a host")
+    allowed_suffixes = (
+        ".openai.azure.com",
+        ".services.ai.azure.com",
+        ".cognitiveservices.azure.com",
+    )
+    if not any(host.endswith(suffix) for suffix in allowed_suffixes):
+        raise ValueError("Azure OpenAI resource host must be an Azure endpoint")
     return normalized
 
 
 def load_config() -> dict:
     if not CONFIG_FILE.exists():
         return {}
+    _assert_secure_file(CONFIG_FILE)
     return json.loads(CONFIG_FILE.read_text())
 
 
 def save_config(config: dict) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
+    _ensure_owner_only_dir(CONFIG_DIR)
+    _write_owner_only_file(CONFIG_FILE, json.dumps(config, indent=2, sort_keys=True) + "\n")
 
 
 def get_stored_resource() -> str | None:
@@ -106,48 +151,60 @@ def get_effective_deployment() -> str | None:
     return get_stored_deployment()
 
 
-def update_codex_config(resource: str) -> Path:
-    normalized = _normalize_resource(resource)
-    CODEX_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+def get_stored_local_auth_token() -> str | None:
+    config = load_config()
+    value = config.get(LOCAL_AUTH_TOKEN_KEY)
+    if not value:
+        return None
+    token = str(value).strip()
+    return token or None
 
-    document = tomlkit.document()
+
+def ensure_local_auth_token() -> str:
+    env_value = os.environ.get(CODEX_LOCAL_AUTH_ENV)
+    if env_value:
+        token = env_value.strip()
+        if token:
+            return token
+    stored = get_stored_local_auth_token()
+    if stored:
+        return stored
+    token = secrets.token_urlsafe(32)
+    config = load_config()
+    config[LOCAL_AUTH_TOKEN_KEY] = token
+    save_config(config)
+    return token
+
+
+def update_codex_config(resource: str) -> Path:
+    normalized_resource = _normalize_resource(resource)
+    token = ensure_local_auth_token()
+
     if CODEX_CONFIG_FILE.exists():
         document = tomlkit.parse(CODEX_CONFIG_FILE.read_text())
+    else:
+        document = tomlkit.document()
 
     document["model"] = CODEX_MODEL_NAME
     document["model_provider"] = CODEX_PROVIDER_NAME
 
-    profile_name = document.get("profile")
-    if isinstance(profile_name, str):
-        profiles = document.get("profiles")
-        if isinstance(profiles, dict):
-            profile = profiles.get(profile_name)
-            if isinstance(profile, dict):
-                if profile.get("model_provider") in {"azure", CODEX_PROVIDER_NAME}:
-                    profile["model_provider"] = CODEX_PROVIDER_NAME
-                if profile.get("model_provider") == CODEX_PROVIDER_NAME and profile.get("model") in {
-                    CODEX_MODEL_NAME,
-                    CODEX_MODEL_ALIAS,
-                }:
-                    profile["model"] = CODEX_MODEL_NAME
-
-    model_providers = document.get("model_providers")
-    if model_providers is None or not isinstance(model_providers, dict):
-        model_providers = tomlkit.table()
-        document["model_providers"] = model_providers
+    providers = document.get("model_providers")
+    if providers is None or not isinstance(providers, dict):
+        providers = tomlkit.table()
+        document["model_providers"] = providers
 
     provider = tomlkit.table()
     provider["name"] = CODEX_PROVIDER_NAME
     provider["env_key"] = CODEX_DUMMY_API_KEY_ENV
     provider["base_url"] = DEFAULT_PROXY_BASE_URL
     provider["wire_api"] = "responses"
-    provider["query_params"] = tomlkit.inline_table()
-    provider["query_params"]["api-version"] = "preview"
+    provider["query_params"] = {"api-version": "preview"}
     provider["stream_idle_timeout_ms"] = DEFAULT_STREAM_IDLE_TIMEOUT_MS
     provider["stream_max_retries"] = DEFAULT_STREAM_MAX_RETRIES
     provider["request_max_retries"] = DEFAULT_REQUEST_MAX_RETRIES
-    provider.comment(f"Azure resource: {normalized}")
-    model_providers[CODEX_PROVIDER_NAME] = provider
+    provider["http_headers"] = {"X-Codex-Proxy-Auth": token}
+    providers[CODEX_PROVIDER_NAME] = provider
 
-    CODEX_CONFIG_FILE.write_text(tomlkit.dumps(document))
+    _ensure_owner_only_dir(CODEX_CONFIG_DIR)
+    _write_owner_only_file(CODEX_CONFIG_FILE, tomlkit.dumps(document))
     return CODEX_CONFIG_FILE

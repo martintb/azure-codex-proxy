@@ -1,6 +1,6 @@
 import argparse
-import signal
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -8,12 +8,14 @@ from pathlib import Path
 
 import httpx
 
-from .app import PROXY_HOST, PROXY_PORT
+from .app import LOCAL_AUTH_HEADER, PROXY_HOST, PROXY_PORT
 from .config import (
     CODEX_DUMMY_API_KEY_ENV,
     CODEX_DUMMY_API_KEY_VALUE,
+    CODEX_LOCAL_AUTH_ENV,
     clear_stored_deployment,
     clear_stored_resource,
+    ensure_local_auth_token,
     get_effective_deployment,
     get_effective_resource,
     set_stored_deployment,
@@ -137,6 +139,9 @@ def _read_proxy_pid() -> int | None:
     if not PID_FILE.exists():
         return None
     try:
+        stat_result = PID_FILE.stat()
+        if stat_result.st_uid != os.getuid() or stat_result.st_mode & 0o022:
+            raise RuntimeError(f"Refusing to use insecure PID file: {PID_FILE}")
         return int(PID_FILE.read_text().strip())
     except ValueError:
         PID_FILE.unlink(missing_ok=True)
@@ -147,10 +152,23 @@ def _remove_pid_file() -> None:
     PID_FILE.unlink(missing_ok=True)
 
 
+def _pid_matches_proxy(pid: int) -> bool:
+    cmdline_path = Path(f"/proc/{pid}/cmdline")
+    if cmdline_path.exists():
+        try:
+            cmdline = cmdline_path.read_bytes().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+        except OSError:
+            return False
+        return "codex_azure.server" in cmdline
+    return True
+
+
 def _stop_proxy_process(timeout_seconds: float = 5.0) -> bool:
     pid = _read_proxy_pid()
     if pid is None:
         return False
+    if not _pid_matches_proxy(pid):
+        raise RuntimeError(f"Refusing to stop unexpected process from PID file: {pid}")
 
     try:
         os.kill(pid, signal.SIGTERM)
@@ -265,7 +283,11 @@ def _ensure_az_login() -> None:
 
 def _is_proxy_healthy() -> bool:
     try:
-        response = httpx.get(f"{PROXY_URL}/healthz", timeout=1.0)
+        response = httpx.get(
+            f"{PROXY_URL}/healthz",
+            timeout=1.0,
+            headers={LOCAL_AUTH_HEADER: ensure_local_auth_token()},
+        )
         return response.is_success
     except httpx.HTTPError:
         return False
@@ -287,9 +309,16 @@ def _start_proxy() -> None:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env={**os.environ, CODEX_LOCAL_AUTH_ENV: ensure_local_auth_token()},
         )
 
+    os.chmod(PID_FILE.parent, 0o700)
     PID_FILE.write_text(f"{process.pid}\n")
+    os.chmod(PID_FILE, 0o600)
+    if not LOG_FILE.exists():
+        LOG_FILE.touch(mode=0o600)
+    else:
+        os.chmod(LOG_FILE, 0o600)
 
     for _ in range(60):
         if _is_proxy_healthy():
@@ -312,6 +341,7 @@ def main() -> None:
 
     _start_proxy()
     os.environ.setdefault(CODEX_DUMMY_API_KEY_ENV, CODEX_DUMMY_API_KEY_VALUE)
+    os.environ.setdefault(CODEX_LOCAL_AUTH_ENV, ensure_local_auth_token())
     os.execvp("codex", ["codex", *remaining])
 
 

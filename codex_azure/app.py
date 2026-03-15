@@ -15,8 +15,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from .config import (
-    CODEX_MODEL_ALIAS,
     CODEX_MODEL_NAME,
+    ensure_local_auth_token,
     get_effective_deployment,
     get_effective_resource,
 )
@@ -31,6 +31,9 @@ TOKEN_REFRESH_SKEW_SECONDS = int(
 )
 PROXY_HOST = os.environ.get("AZURE_OPENAI_PROXY_HOST", "127.0.0.1")
 PROXY_PORT = int(os.environ.get("AZURE_OPENAI_PROXY_PORT", "43123"))
+MAX_REQUEST_BODY_BYTES = int(os.environ.get("AZURE_OPENAI_PROXY_MAX_BODY_BYTES", str(10 * 1024 * 1024)))
+ALLOWED_METHODS = {"GET", "POST", "DELETE"}
+LOCAL_AUTH_HEADER = "x-codex-proxy-auth"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("azure-openai-proxy")
@@ -46,6 +49,7 @@ _token_value: Optional[str] = None
 _token_expires_on: float = 0.0
 _token_lock = asyncio.Lock()
 http_client: Optional[httpx.AsyncClient] = None
+local_auth_token: Optional[str] = None
 
 
 def get_azure_resource() -> str:
@@ -65,6 +69,13 @@ def get_azure_deployment() -> str | None:
     return get_effective_deployment()
 
 
+def require_local_auth(request: Request) -> None:
+    expected = local_auth_token or ensure_local_auth_token()
+    presented = request.headers.get(LOCAL_AUTH_HEADER, "")
+    if not expected or presented != expected:
+        raise PermissionError("Missing or invalid local proxy authentication")
+
+
 def rewrite_request_body(body: bytes, content_type: str) -> bytes:
     if "application/json" not in content_type:
         return body
@@ -78,10 +89,7 @@ def rewrite_request_body(body: bytes, content_type: str) -> bytes:
     except json.JSONDecodeError:
         return body
 
-    if isinstance(payload, dict) and payload.get("model") in {
-        CODEX_MODEL_ALIAS,
-        CODEX_MODEL_NAME,
-    }:
+    if isinstance(payload, dict) and payload.get("model") == CODEX_MODEL_NAME:
         payload["model"] = deployment
         return json.dumps(payload).encode("utf-8")
 
@@ -129,6 +137,7 @@ def filter_request_headers(headers) -> dict:
             "authorization",
             "connection",
             "accept-encoding",
+            LOCAL_AUTH_HEADER,
         }:
             continue
         filtered[key] = value
@@ -152,7 +161,13 @@ def filter_response_headers(headers) -> dict:
 async def forward_request(request: Request, path: str) -> Response:
     assert http_client is not None
 
+    if request.method.upper() not in ALLOWED_METHODS:
+        return JSONResponse(status_code=405, content={"error": "Method not allowed"})
+
     body = await request.body()
+    if len(body) > MAX_REQUEST_BODY_BYTES:
+        return JSONResponse(status_code=413, content={"error": "Request body too large"})
+
     upstream_url = f"{get_upstream_base()}/{path}"
 
     headers = filter_request_headers(request.headers)
@@ -204,8 +219,9 @@ async def forward_request(request: Request, path: str) -> Response:
 
 @app.on_event("startup")
 async def startup() -> None:
-    global http_client
+    global http_client, local_auth_token
     http_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0))
+    local_auth_token = ensure_local_auth_token()
     await get_valid_token(force_refresh=False)
     log.info("Proxy ready on http://%s:%s", PROXY_HOST, PROXY_PORT)
 
@@ -219,22 +235,24 @@ async def shutdown() -> None:
 
 
 @app.get("/healthz")
-async def healthz():
+async def healthz(request: Request):
     try:
+        require_local_auth(request)
         await get_valid_token(force_refresh=False)
-        return {
-            "ok": True,
-            "resource": get_azure_resource(),
-            "token_expires_on": _token_expires_on,
-        }
-    except Exception as exc:
-        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+        return {"ok": True}
+    except PermissionError:
+        return JSONResponse(status_code=401, content={"ok": False, "error": "Unauthorized"})
+    except Exception:
+        return JSONResponse(status_code=500, content={"ok": False, "error": "Unavailable"})
 
 
 @app.api_route("/openai/v1/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 async def proxy(path: str, request: Request):
     try:
+        require_local_auth(request)
         return await forward_request(request, path)
-    except Exception as exc:
+    except PermissionError:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    except Exception:
         log.exception("Proxy error")
-        return JSONResponse(status_code=502, content={"error": str(exc)})
+        return JSONResponse(status_code=502, content={"error": "Bad gateway"})

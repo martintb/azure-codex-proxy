@@ -12,6 +12,11 @@ dependencies = [
     "uvicorn",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
 [project.scripts]
 codex-azure = "codex_azure.cli:main"
 
