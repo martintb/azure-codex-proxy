@@ -22,12 +22,13 @@ This repository contains `azure-codex-proxy`, a small Python package and CLI tha
 - Always use `uv` for Python execution, dependency management, and test commands.
 - Do not invoke `python`, `python3`, `pip`, or `pytest` directly unless the user explicitly asks for that or there is a documented exception.
 - Preferred command forms:
-  - `uv run python -m ...`
-  - `uv run pytest ...`
-  - `uv sync`
-  - `uv add ...` or `uv remove ...` when dependencies need to change
+- `uv run python -m ...`
+- `uv run pytest ...`
+- `uv sync`
+- `uv add ...` or `uv remove ...` when dependencies need to change
 - If you need to run a one-off Python snippet, use `uv run python - <<'PY'` rather than system Python.
 - If dependencies appear to be missing, prefer `uv sync` over ad hoc installation commands.
+- On this machine, `uv` may occasionally panic before the target command starts with a Tokio executor error such as `Tokio executor failed` or a `system-configuration` panic. If that happens, keep using `uv`, but rerun the same `uv ...` command outside the sandbox with escalation instead of falling back to `python`, `pip`, or bare `pytest`.
 
 ## Testing and Validation
 - Run the smallest relevant test set first, then broaden if needed.
