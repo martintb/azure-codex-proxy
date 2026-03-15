@@ -1,17 +1,31 @@
 import importlib
 import sys
 
+import platformdirs
 import pytest
+
+
+class FakePlatformDirs:
+    def __init__(self, config_dir, cache_dir):
+        self.user_config_dir = str(config_dir)
+        self.user_cache_dir = str(cache_dir)
 
 
 @pytest.fixture
 def isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
+    config_dir = home / "native-config"
+    cache_dir = home / "native-cache"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
     monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
+    monkeypatch.setattr(
+        platformdirs,
+        "PlatformDirs",
+        lambda *args, **kwargs: FakePlatformDirs(config_dir, cache_dir),
+    )
     monkeypatch.delenv("AZURE_OPENAI_RESOURCE", raising=False)
     monkeypatch.delenv("AZURE_OPENAI_DEPLOYMENT", raising=False)
     monkeypatch.delenv("CODEX_AZURE_PROXY_AUTH_TOKEN", raising=False)

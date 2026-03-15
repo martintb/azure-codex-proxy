@@ -185,13 +185,13 @@ def clear_proxy_runtime_state() -> None:
 
 
 def get_preferred_proxy_endpoint() -> tuple[str, int]:
-    runtime_state = load_proxy_runtime_state()
-    if runtime_state is not None:
-        return str(runtime_state["host"]), int(runtime_state["port"])
-
     fixed_port = get_fixed_proxy_port_override()
     if fixed_port is not None:
         return get_proxy_connect_host(get_effective_proxy_host()), fixed_port
+
+    runtime_state = load_proxy_runtime_state()
+    if runtime_state is not None:
+        return str(runtime_state["host"]), int(runtime_state["port"])
 
     return get_proxy_connect_host(get_effective_proxy_host()), DEFAULT_PROXY_PORT
 
