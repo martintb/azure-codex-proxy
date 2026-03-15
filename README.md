@@ -8,11 +8,13 @@ Supported platforms: Linux, macOS, and Windows.
 
 Install:
 
+Install Codex first by following the official [Codex CLI setup guide](https://developers.openai.com/codex/cli).
+
 ```bash
 pip install git+https://github.com/tbm/azure-codex-proxy.git
 ```
 
-Install Codex first by following the official [Codex CLI setup guide](https://developers.openai.com/codex/cli).
+Once installed, you should be able to start the codex session via
 
 Run:
 
