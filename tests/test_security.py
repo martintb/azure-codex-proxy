@@ -99,3 +99,49 @@ def test_update_codex_config_includes_auth_header(isolated_home):
     config_text = CODEX_CONFIG_FILE.read_text()
     assert "X-Codex-Proxy-Auth" in config_text
     assert "azure-openai-proxy" in config_text
+
+
+def test_update_codex_config_preserves_existing_provider_table(isolated_home):
+    from codex_azure.config import CODEX_CONFIG_FILE, update_codex_config
+
+    CODEX_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CODEX_CONFIG_FILE.write_text(
+        """
+model_provider = \"azure-openai-proxy\"
+profile = \"azure_gpt_54\"
+
+[model_providers.azure-openai-proxy]
+name = \"azure-openai-proxy\"
+base_url = \"http://127.0.0.1:43123/openai/v1\"
+wire_api = \"responses\"
+
+[profiles.azure_gpt_54]
+model_provider = \"azure-openai-proxy\"
+model = \"gpt-5.4\"
+""".strip()
+        + "\n"
+    )
+
+    update_codex_config("https://myresource.openai.azure.com")
+
+    config_text = CODEX_CONFIG_FILE.read_text()
+    assert "[profiles.azure_gpt_54]" in config_text
+    assert 'http_headers = {X-Codex-Proxy-Auth = ' in config_text
+
+
+def test_update_codex_config_preserves_existing_real_model(isolated_home):
+    from codex_azure.config import CODEX_CONFIG_FILE, update_codex_config
+
+    CODEX_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CODEX_CONFIG_FILE.write_text(
+        """
+model = \"gpt-5.4\"
+model_provider = \"azure-openai-proxy\"
+""".strip()
+        + "\n"
+    )
+
+    update_codex_config("https://myresource.openai.azure.com")
+
+    config_text = CODEX_CONFIG_FILE.read_text()
+    assert 'model = "gpt-5.4"' in config_text

@@ -179,13 +179,18 @@ def ensure_local_auth_token() -> str:
 def update_codex_config(resource: str) -> Path:
     normalized_resource = _normalize_resource(resource)
     token = ensure_local_auth_token()
+    deployment = get_effective_deployment()
 
     if CODEX_CONFIG_FILE.exists():
         document = tomlkit.parse(CODEX_CONFIG_FILE.read_text())
     else:
         document = tomlkit.document()
 
-    document["model"] = CODEX_MODEL_NAME
+    existing_model = document.get("model")
+    if isinstance(existing_model, str) and existing_model.strip() and existing_model != CODEX_MODEL_NAME:
+        document["model"] = existing_model.strip()
+    elif deployment:
+        document["model"] = deployment
     document["model_provider"] = CODEX_PROVIDER_NAME
 
     providers = document.get("model_providers")
@@ -193,7 +198,10 @@ def update_codex_config(resource: str) -> Path:
         providers = tomlkit.table()
         document["model_providers"] = providers
 
-    provider = tomlkit.table()
+    provider = providers.get(CODEX_PROVIDER_NAME)
+    if provider is None or not isinstance(provider, dict):
+        provider = tomlkit.table()
+
     provider["name"] = CODEX_PROVIDER_NAME
     provider["env_key"] = CODEX_DUMMY_API_KEY_ENV
     provider["base_url"] = DEFAULT_PROXY_BASE_URL
@@ -202,7 +210,13 @@ def update_codex_config(resource: str) -> Path:
     provider["stream_idle_timeout_ms"] = DEFAULT_STREAM_IDLE_TIMEOUT_MS
     provider["stream_max_retries"] = DEFAULT_STREAM_MAX_RETRIES
     provider["request_max_retries"] = DEFAULT_REQUEST_MAX_RETRIES
-    provider["http_headers"] = {"X-Codex-Proxy-Auth": token}
+
+    http_headers = provider.get("http_headers")
+    if http_headers is None or not isinstance(http_headers, dict):
+        http_headers = tomlkit.inline_table()
+    http_headers["X-Codex-Proxy-Auth"] = token
+    provider["http_headers"] = http_headers
+
     providers[CODEX_PROVIDER_NAME] = provider
 
     _ensure_owner_only_dir(CODEX_CONFIG_DIR)
