@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from .config import (
     CODEX_MODEL_NAME,
+    LOCAL_AUTH_HEADER,
     ensure_local_auth_token,
     get_effective_deployment,
     get_effective_proxy_host,
@@ -36,7 +37,6 @@ PROXY_HOST = get_effective_proxy_host()
 PROXY_PORT = get_effective_proxy_port()
 MAX_REQUEST_BODY_BYTES = int(os.environ.get("AZURE_OPENAI_PROXY_MAX_BODY_BYTES", str(10 * 1024 * 1024)))
 ALLOWED_METHODS = {"GET", "POST", "DELETE"}
-LOCAL_AUTH_HEADER = "x-codex-proxy-auth"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("azure-openai-proxy")

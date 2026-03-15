@@ -4,25 +4,28 @@ Proxy service for `codex` that acquires and refreshes Azure access tokens automa
 
 Supported platforms: Linux, macOS, and Windows.
 
+## Requirements
+
+- `uv` installed. See Astral's [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/).
+- `codex` installed and available on your `PATH`. Follow the official [Codex CLI setup guide](https://developers.openai.com/codex/cli).
+- Access to an Azure OpenAI resource and deployment
+- If not using uv: Python 3.13+ if you plan to run the project from source
+
 ## Quick start
 
-Install Codex first by following the official [Codex CLI setup guide](https://developers.openai.com/codex/cli).
-
-The install this package using pip:
+Install this package with `uv`:
 
 ```bash
-pip install git+https://github.com/tbm/azure-codex-proxy.git
+uv tool install git+https://github.com/martintb/azure-codex-proxy.git
 ```
 
-Once installed, you should be able to start the codex session via:
-
-Run:
+Then start Codex through the local Azure proxy:
 
 ```bash
 codex-azure
 ```
 
-On first run, if these are not already configured, `codex-azure` will prompt for them and store them in its per-user platform config directory:
+On first run, if these are not already configured, `codex-azure` prompts for them and stores them in its per-user platform config directory:
 
 - Azure OpenAI resource URL (e.g., "https://<your-resource>.cognitiveservices.azure.com")
 - Azure OpenAI deployment name (e.g., "gpt-5.4")
@@ -42,21 +45,6 @@ codex-azure config set-deployment gpt-5.4
 ```
 
 After the proxy is ready, `codex-azure` starts `codex` and passes through any extra arguments.
-
-## Requirements
-
-- Python 3.13+
-- `codex` installed and available on your `PATH`
-- Access to an Azure OpenAI resource and deployment
-- Azure CLI installed with `az login`, or the ability to complete an interactive browser login
-
-Package dependencies are installed automatically by `pip install git+https://github.com/tbm/azure-codex-proxy.git`:
-
-- `azure-identity`
-- `fastapi`
-- `httpx`
-- `tomlkit`
-- `uvicorn`
 
 
 ## What this does
@@ -116,7 +104,7 @@ codex-azure restart-proxy
 Run only the proxy server without launching `codex`:
 
 ```bash
-python -m codex_azure.server
+uv run python -m codex_azure.server
 ```
 
 ## Configuration
@@ -324,16 +312,16 @@ Check:
 
 ## Development notes
 
-Install in editable mode while working on the project:
+Create the local development environment with `uv`:
 
 ```bash
-pip install -e git+https://github.com/tbm/azure-codex-proxy.git
+uv sync --extra dev
 ```
 
 Run the proxy module directly during development:
 
 ```bash
-python -m codex_azure.server
+uv run python -m codex_azure.server
 ```
 
 ## Resource configuration
@@ -424,5 +412,5 @@ Authentication uses Azure CLI first and falls back to an interactive browser log
 ## Run only the proxy
 
 ```bash
-python -m codex_azure.server
+uv run python -m codex_azure.server
 ```

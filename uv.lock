@@ -308,7 +308,7 @@ requires-dist = [
     { name = "azure-cli", specifier = ">=2.84" },
     { name = "azure-identity" },
     { name = "fastapi" },
-    { name = "httpx" },
+    { name = "httpx", specifier = ">=0.28.1,<0.29a0" },
     { name = "platformdirs" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "tomlkit" },

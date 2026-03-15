@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,6 +23,13 @@ def test_has_command_uses_shutil_which(isolated_home, monkeypatch, load_module):
 
     assert cli._has_command("az") is True
     assert calls == ["az"]
+
+
+def test_cli_import_does_not_import_app_module(isolated_home, load_module):
+    cli = load_module("codex_azure.cli")
+
+    assert cli.LOCAL_AUTH_HEADER == "x-codex-proxy-auth"
+    assert "codex_azure.app" not in sys.modules
 
 
 def test_read_proxy_pid_falls_back_to_legacy_path(isolated_home, monkeypatch, load_module):

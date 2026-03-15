@@ -16,6 +16,7 @@ CODEX_MODEL_NAME = "azure-openai-proxy"
 CODEX_DUMMY_API_KEY_ENV = "CODEX_AZURE_OPENAI_DUMMY_API_KEY"
 CODEX_DUMMY_API_KEY_VALUE = "azure-openai-proxy"
 CODEX_LOCAL_AUTH_ENV = "CODEX_AZURE_PROXY_AUTH_TOKEN"
+LOCAL_AUTH_HEADER = "x-codex-proxy-auth"
 DEFAULT_PROXY_HOST = "127.0.0.1"
 DEFAULT_PROXY_PORT = 43123
 AUTO_PROXY_PORT = 0
@@ -351,7 +352,7 @@ def update_codex_config(resource: str, proxy_base_url: str, force_model: bool = 
     http_headers = provider.get("http_headers")
     if http_headers is None or not isinstance(http_headers, dict):
         http_headers = tomlkit.inline_table()
-    http_headers["X-Codex-Proxy-Auth"] = token
+    http_headers[LOCAL_AUTH_HEADER.title()] = token
     provider["http_headers"] = http_headers
 
     providers[CODEX_PROVIDER_NAME] = provider

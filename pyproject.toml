@@ -6,9 +6,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "azure-identity",
-    "azure-cli>=2.84",
+    "azure-cli>=2.84.0b1",
     "fastapi",
-    "httpx",
+    "httpx>=0.28.1,<0.29a0",
     "platformdirs",
     "tomlkit",
     "uvicorn",
@@ -39,6 +39,3 @@ version-file = "codex_azure/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["codex_azure"]
-
-[tool.uv]
-prerelease = "allow"

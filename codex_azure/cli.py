@@ -9,11 +9,11 @@ from pathlib import Path
 
 import httpx
 
-from .app import LOCAL_AUTH_HEADER
 from .config import (
     CODEX_DUMMY_API_KEY_ENV,
     CODEX_DUMMY_API_KEY_VALUE,
     CODEX_LOCAL_AUTH_ENV,
+    LOCAL_AUTH_HEADER,
     clear_proxy_runtime_state,
     clear_stored_deployment,
     clear_stored_resource,
