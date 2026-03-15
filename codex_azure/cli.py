@@ -36,6 +36,15 @@ def _prompt_for_resource() -> str:
             print(f"Invalid resource: {exc}", file=sys.stderr)
 
 
+def _prompt_for_deployment() -> str:
+    while True:
+        value = input("Azure OpenAI deployment name: ").strip()
+        try:
+            return set_stored_deployment(value)
+        except ValueError as exc:
+            print(f"Invalid deployment: {exc}", file=sys.stderr)
+
+
 def _ensure_resource() -> str:
     resource = get_effective_resource()
     if resource:
@@ -48,6 +57,22 @@ def _ensure_resource() -> str:
     resource = _prompt_for_resource()
     print(f"Stored Azure OpenAI resource: {resource}", file=sys.stderr)
     return resource
+
+
+def _ensure_deployment() -> str:
+    deployment = get_effective_deployment()
+    if deployment:
+        return deployment
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "AZURE_OPENAI_DEPLOYMENT is not set and no stored deployment exists. Run 'codex-azure config set-deployment'."
+        )
+    print("Azure OpenAI deployment is not configured.", file=sys.stderr)
+    deployment = _prompt_for_deployment()
+    resource = _ensure_resource()
+    update_codex_config(resource)
+    print(f"Stored Azure OpenAI deployment: {deployment}", file=sys.stderr)
+    return deployment
 
 
 def _print_resource() -> int:
@@ -251,6 +276,7 @@ def _start_proxy() -> None:
         return
 
     _ensure_resource()
+    _ensure_deployment()
     _ensure_az_login()
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
 
