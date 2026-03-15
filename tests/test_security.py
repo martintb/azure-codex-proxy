@@ -21,8 +21,9 @@ def test_local_auth_token_persisted_owner_only(isolated_home, load_module):
     assert token
 
     config_file = config.get_config_file()
-    mode = config_file.stat().st_mode & 0o777
-    assert mode == 0o600
+    if not config.platform_support.is_windows():
+        mode = config_file.stat().st_mode & 0o777
+        assert mode == 0o600
 
     data = json.loads(config_file.read_text(encoding="utf-8"))
     assert data["local_auth_token"] == token

@@ -81,7 +81,13 @@ def test_start_proxy_writes_pid_file_to_native_cache_dir(isolated_home, monkeypa
 
     _, kwargs = popen_calls[0]
     assert kwargs["env"][cli.CODEX_LOCAL_AUTH_ENV] == "secret"
-    assert kwargs["start_new_session"] is True
+    if cli.platform_support.is_windows():
+        assert kwargs["creationflags"] == (
+            getattr(cli.subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(cli.subprocess, "DETACHED_PROCESS", 0)
+        )
+    else:
+        assert kwargs["start_new_session"] is True
 
 
 def test_launch_codex_execs_on_posix(isolated_home, monkeypatch, load_module):
