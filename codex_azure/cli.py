@@ -8,7 +8,12 @@ from pathlib import Path
 import httpx
 
 from .app import PROXY_HOST, PROXY_PORT
-from .config import clear_stored_resource, get_effective_resource, set_stored_resource
+from .config import (
+    clear_stored_resource,
+    get_effective_resource,
+    set_stored_resource,
+    update_codex_config,
+)
 
 
 PROXY_URL = f"http://{PROXY_HOST}:{PROXY_PORT}"
@@ -54,7 +59,9 @@ def _set_resource(value: str | None) -> int:
             raise RuntimeError("A resource URL is required when stdin is not interactive.")
         value = input("Azure OpenAI resource URL: ").strip()
     resource = set_stored_resource(value)
+    codex_config_path = update_codex_config(resource)
     print(f"Stored Azure OpenAI resource: {resource}")
+    print(f"Updated Codex config: {codex_config_path}")
     return 0
 
 

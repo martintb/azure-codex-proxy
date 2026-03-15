@@ -20,6 +20,22 @@ export AZURE_OPENAI_RESOURCE="https://<your-resource>.openai.azure.com"
 
 If `AZURE_OPENAI_RESOURCE` is not set, `codex-azure` will prompt for the resource URL the first time you run it and store that value in `~/.config/codex-azure/config.json`.
 
+When you run `codex-azure config set-resource`, it also updates `~/.codex/config.toml` without deleting unrelated TOML. It ensures these settings exist:
+
+```toml
+model = "azure-openai-proxy"
+model_provider = "azure-openai-proxy"
+
+[model_providers.azure-openai-proxy]
+name = "azure-openai-proxy"
+env_key = "OPENAI_API_KEY"
+base_url = "http://127.0.0.1:4000/openai/v1"
+wire_api = "responses"
+query_params = { api-version = "preview" }
+```
+
+Existing keys and tables in `~/.codex/config.toml` are preserved.
+
 You can manage the stored value explicitly:
 
 ```bash

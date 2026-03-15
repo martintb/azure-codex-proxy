@@ -8,6 +8,7 @@ dependencies = [
     "azure-identity",
     "fastapi",
     "httpx",
+    "tomlkit",
     "uvicorn",
 ]
 
