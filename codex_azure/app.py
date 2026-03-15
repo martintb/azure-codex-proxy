@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from typing import Optional
 
 import httpx
@@ -38,7 +39,6 @@ LOCAL_AUTH_HEADER = "x-codex-proxy-auth"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("azure-openai-proxy")
 
-app = FastAPI()
 
 credential = ChainedTokenCredential(
     AzureCliCredential(),
@@ -217,21 +217,22 @@ async def forward_request(request: Request, path: str) -> Response:
     )
 
 
-@app.on_event("startup")
-async def startup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     global http_client, local_auth_token
     http_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0))
     local_auth_token = ensure_local_auth_token()
     await get_valid_token(force_refresh=False)
     log.info("Proxy ready on http://%s:%s", PROXY_HOST, PROXY_PORT)
+    try:
+        yield
+    finally:
+        if http_client is not None:
+            await http_client.aclose()
+            http_client = None
 
 
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    global http_client
-    if http_client is not None:
-        await http_client.aclose()
-        http_client = None
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/healthz")
