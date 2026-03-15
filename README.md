@@ -9,8 +9,10 @@ Supported platforms: Linux, macOS, and Windows.
 Install:
 
 ```bash
-pip install .
+pip install git+https://github.com/tbm/azure-codex-proxy.git
 ```
+
+Install Codex first by following the official [Codex CLI setup guide](https://developers.openai.com/codex/cli).
 
 Run:
 
@@ -63,7 +65,7 @@ The proxy then:
 - Access to an Azure OpenAI resource and deployment
 - Azure CLI installed with `az login`, or the ability to complete an interactive browser login
 
-Package dependencies are installed automatically by `pip install .`:
+Package dependencies are installed automatically by `pip install git+https://github.com/tbm/azure-codex-proxy.git`:
 
 - `azure-identity`
 - `fastapi`
@@ -316,7 +318,7 @@ Check:
 Install in editable mode while working on the project:
 
 ```bash
-pip install -e .
+pip install -e git+https://github.com/tbm/azure-codex-proxy.git
 ```
 
 Run the proxy module directly during development:
