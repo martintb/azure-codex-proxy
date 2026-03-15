@@ -1,4 +1,5 @@
 import argparse
+import signal
 import os
 import subprocess
 import sys
@@ -9,8 +10,13 @@ import httpx
 
 from .app import PROXY_HOST, PROXY_PORT
 from .config import (
+    CODEX_DUMMY_API_KEY_ENV,
+    CODEX_DUMMY_API_KEY_VALUE,
+    clear_stored_deployment,
     clear_stored_resource,
+    get_effective_deployment,
     get_effective_resource,
+    set_stored_deployment,
     set_stored_resource,
     update_codex_config,
 )
@@ -53,6 +59,15 @@ def _print_resource() -> int:
     return 0
 
 
+def _print_deployment() -> int:
+    deployment = get_effective_deployment()
+    if not deployment:
+        print("No Azure OpenAI deployment configured.", file=sys.stderr)
+        return 1
+    print(deployment)
+    return 0
+
+
 def _set_resource(value: str | None) -> int:
     if value is None:
         if not sys.stdin.isatty():
@@ -65,9 +80,98 @@ def _set_resource(value: str | None) -> int:
     return 0
 
 
+def _set_deployment(value: str | None) -> int:
+    if value is None:
+        if not sys.stdin.isatty():
+            raise RuntimeError("A deployment name is required when stdin is not interactive.")
+        value = input("Azure OpenAI deployment name: ").strip()
+    deployment = set_stored_deployment(value)
+    resource = _ensure_resource()
+    codex_config_path = update_codex_config(resource)
+    print(f"Stored Azure OpenAI deployment: {deployment}")
+    print(f"Updated Codex config: {codex_config_path}")
+    return 0
+
+
 def _clear_resource() -> int:
     clear_stored_resource()
     print("Cleared stored Azure OpenAI resource.")
+    return 0
+
+
+def _clear_deployment() -> int:
+    clear_stored_deployment()
+    resource = get_effective_resource()
+    if resource:
+        update_codex_config(resource)
+    print("Cleared stored Azure OpenAI deployment.")
+    return 0
+
+
+def _read_proxy_pid() -> int | None:
+    if not PID_FILE.exists():
+        return None
+    try:
+        return int(PID_FILE.read_text().strip())
+    except ValueError:
+        PID_FILE.unlink(missing_ok=True)
+        return None
+
+
+def _remove_pid_file() -> None:
+    PID_FILE.unlink(missing_ok=True)
+
+
+def _stop_proxy_process(timeout_seconds: float = 5.0) -> bool:
+    pid = _read_proxy_pid()
+    if pid is None:
+        return False
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        _remove_pid_file()
+        return False
+
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            _remove_pid_file()
+            return True
+        time.sleep(0.1)
+
+    os.kill(pid, signal.SIGKILL)
+    deadline = time.time() + 1.0
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            _remove_pid_file()
+            return True
+        time.sleep(0.05)
+
+    return False
+
+
+def _stop_proxy() -> int:
+    stopped = _stop_proxy_process()
+    if stopped:
+        print("Stopped Azure OpenAI proxy.")
+        return 0
+    if _is_proxy_healthy():
+        raise RuntimeError(
+            f"Proxy is still healthy at {PROXY_URL}, but no matching PID file was usable. Stop it manually."
+        )
+    print("Azure OpenAI proxy is not running.")
+    return 0
+
+
+def _restart_proxy() -> int:
+    _stop_proxy_process()
+    _start_proxy()
+    print("Restarted Azure OpenAI proxy.")
     return 0
 
 
@@ -84,12 +188,28 @@ def _build_parser() -> argparse.ArgumentParser:
     show_parser = config_subparsers.add_parser("show-resource", help="Print the configured resource")
     show_parser.set_defaults(handler=lambda args: _print_resource())
 
+    show_deployment_parser = config_subparsers.add_parser("show-deployment", help="Print the configured deployment")
+    show_deployment_parser.set_defaults(handler=lambda args: _print_deployment())
+
     set_parser = config_subparsers.add_parser("set-resource", help="Set the configured resource")
     set_parser.add_argument("resource", nargs="?", help="Azure OpenAI resource URL")
     set_parser.set_defaults(handler=lambda args: _set_resource(args.resource))
 
+    set_deployment_parser = config_subparsers.add_parser("set-deployment", help="Set the configured deployment")
+    set_deployment_parser.add_argument("deployment", nargs="?", help="Azure OpenAI deployment name")
+    set_deployment_parser.set_defaults(handler=lambda args: _set_deployment(args.deployment))
+
     clear_parser = config_subparsers.add_parser("clear-resource", help="Clear the stored resource")
     clear_parser.set_defaults(handler=lambda args: _clear_resource())
+
+    clear_deployment_parser = config_subparsers.add_parser("clear-deployment", help="Clear the stored deployment")
+    clear_deployment_parser.set_defaults(handler=lambda args: _clear_deployment())
+
+    stop_parser = subparsers.add_parser("stop-proxy", help="Stop the background proxy")
+    stop_parser.set_defaults(handler=lambda args: _stop_proxy())
+
+    restart_parser = subparsers.add_parser("restart-proxy", help="Restart the background proxy")
+    restart_parser.set_defaults(handler=lambda args: _restart_proxy())
 
     return parser
 
@@ -165,4 +285,9 @@ def main() -> None:
         raise SystemExit(2)
 
     _start_proxy()
+    os.environ.setdefault(CODEX_DUMMY_API_KEY_ENV, CODEX_DUMMY_API_KEY_VALUE)
     os.execvp("codex", ["codex", *remaining])
+
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import time
@@ -13,7 +14,7 @@ from azure.identity import (
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from .config import get_effective_resource
+from .config import CODEX_MODEL_NAME, get_effective_deployment, get_effective_resource
 
 
 AZURE_SCOPE = os.environ.get(
@@ -24,7 +25,7 @@ TOKEN_REFRESH_SKEW_SECONDS = int(
     os.environ.get("AZURE_OPENAI_TOKEN_REFRESH_SKEW_SECONDS", "300")
 )
 PROXY_HOST = os.environ.get("AZURE_OPENAI_PROXY_HOST", "127.0.0.1")
-PROXY_PORT = int(os.environ.get("AZURE_OPENAI_PROXY_PORT", "4000"))
+PROXY_PORT = int(os.environ.get("AZURE_OPENAI_PROXY_PORT", "43123"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("azure-openai-proxy")
@@ -55,6 +56,30 @@ def get_upstream_base() -> str:
     return f"{get_azure_resource()}/openai/v1"
 
 
+def get_azure_deployment() -> str | None:
+    return get_effective_deployment()
+
+
+def rewrite_request_body(body: bytes, content_type: str) -> bytes:
+    if "application/json" not in content_type:
+        return body
+
+    deployment = get_azure_deployment()
+    if not deployment:
+        return body
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+
+    if isinstance(payload, dict) and payload.get("model") == CODEX_MODEL_NAME:
+        payload["model"] = deployment
+        return json.dumps(payload).encode("utf-8")
+
+    return body
+
+
 async def get_valid_token(force_refresh: bool = False) -> str:
     global _token_value, _token_expires_on
 
@@ -66,6 +91,7 @@ async def get_valid_token(force_refresh: bool = False) -> str:
     )
 
     if not needs_refresh:
+        assert _token_value is not None
         return _token_value
 
     async with _token_lock:
@@ -76,6 +102,7 @@ async def get_valid_token(force_refresh: bool = False) -> str:
             or now >= (_token_expires_on - TOKEN_REFRESH_SKEW_SECONDS)
         )
         if not needs_refresh:
+            assert _token_value is not None
             return _token_value
 
         log.info("Refreshing Azure token")
@@ -121,6 +148,7 @@ async def forward_request(request: Request, path: str) -> Response:
     upstream_url = f"{get_upstream_base()}/{path}"
 
     headers = filter_request_headers(request.headers)
+    body = rewrite_request_body(body, request.headers.get("content-type", ""))
     token = await get_valid_token(force_refresh=False)
     headers["Authorization"] = f"Bearer {token}"
 
