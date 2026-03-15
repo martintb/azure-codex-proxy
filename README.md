@@ -69,6 +69,15 @@ Package dependencies are installed automatically by `pip install .`:
 - `tomlkit`
 - `uvicorn`
 
+## Versioning
+
+Package versions are derived from Git tags using Hatch VCS versioning.
+
+- Release tags should use a `v` prefix, for example `v0.1.0`.
+- Built package metadata resolves that tag to the semver version `0.1.0`.
+- Untagged commits build as development versions on the `0.1.0` line until a matching release tag exists.
+- If VCS metadata is unavailable entirely, builds fall back to `0.1.0`.
+
 ## Basic usage
 
 Start the proxy if needed, then launch `codex`:

@@ -131,6 +131,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+codex_azure/_version.py
 
 # Spyder project settings
 .spyderproject

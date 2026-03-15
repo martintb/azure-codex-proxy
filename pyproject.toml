@@ -1,6 +1,6 @@
 [project]
 name = "azure-codex-proxy"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Proxy service that refreshes Azure tokens for codex-cli"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -21,8 +21,19 @@ dev = [
 codex-azure = "codex_azure.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.1.0"
+
+[tool.hatch.version.raw-options]
+tag_regex = "^(?:v)?(?P<version>.+)$"
+version_scheme = "no-guess-dev"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "codex_azure/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["codex_azure"]
