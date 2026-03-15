@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -22,11 +23,10 @@ from .config import (
     set_stored_resource,
     update_codex_config,
 )
+from . import platform as platform_support
 
 
 PROXY_URL = f"http://{PROXY_HOST}:{PROXY_PORT}"
-PID_FILE = Path.home() / ".cache" / "azure-openai-proxy.pid"
-LOG_FILE = Path.home() / ".cache" / "azure-openai-proxy.log"
 
 
 def _prompt_for_resource() -> str:
@@ -135,63 +135,148 @@ def _clear_deployment() -> int:
     return 0
 
 
-def _read_proxy_pid() -> int | None:
-    if not PID_FILE.exists():
-        return None
+def _get_pid_file() -> Path:
+    return platform_support.get_proxy_pid_file()
+
+
+def _get_log_file() -> Path:
+    return platform_support.get_proxy_log_file()
+
+
+def _remove_pid_files() -> None:
+    for path in platform_support.iter_proxy_pid_files():
+        path.unlink(missing_ok=True)
+
+
+def _read_pid_from_file(path: Path) -> int | None:
+    platform_support.assert_secure_private_file(path)
     try:
-        stat_result = PID_FILE.stat()
-        if stat_result.st_uid != os.getuid() or stat_result.st_mode & 0o022:
-            raise RuntimeError(f"Refusing to use insecure PID file: {PID_FILE}")
-        return int(PID_FILE.read_text().strip())
+        return int(path.read_text(encoding="utf-8").strip())
     except ValueError:
-        PID_FILE.unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
         return None
 
 
-def _remove_pid_file() -> None:
-    PID_FILE.unlink(missing_ok=True)
+def _read_proxy_pid() -> tuple[int | None, Path | None]:
+    for path in platform_support.iter_proxy_pid_files():
+        if not path.exists():
+            continue
+        pid = _read_pid_from_file(path)
+        if pid is not None:
+            return pid, path
+    return None, None
 
 
-def _pid_matches_proxy(pid: int) -> bool:
+def _get_windows_shell() -> str:
+    for command in ("powershell", "pwsh"):
+        if shutil.which(command):
+            return command
+    return "powershell"
+
+
+def _get_process_command_line(pid: int) -> str | None:
+    if platform_support.is_windows():
+        completed = subprocess.run(
+            [
+                _get_windows_shell(),
+                "-NoProfile",
+                "-Command",
+                (
+                    f"$process = Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" "
+                    "-ErrorAction SilentlyContinue; "
+                    "if ($null -ne $process) { $process.CommandLine }"
+                ),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return None
+        command_line = completed.stdout.strip()
+        return command_line or None
+
     cmdline_path = Path(f"/proc/{pid}/cmdline")
     if cmdline_path.exists():
         try:
-            cmdline = cmdline_path.read_bytes().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+            command_line = cmdline_path.read_bytes().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
         except OSError:
-            return False
-        return "codex_azure.server" in cmdline
+            return None
+        return command_line or None
+
+    completed = subprocess.run(
+        ["ps", "-o", "command=", "-p", str(pid)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    command_line = completed.stdout.strip()
+    return command_line or None
+
+
+def _pid_matches_proxy(pid: int) -> bool:
+    command_line = _get_process_command_line(pid)
+    return command_line is not None and "codex_azure.server" in command_line
+
+
+def _is_process_running(pid: int) -> bool:
+    if platform_support.is_windows():
+        return _get_process_command_line(pid) is not None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
     return True
 
 
+def _terminate_windows_process(pid: int, force: bool) -> None:
+    command = ["taskkill", "/PID", str(pid), "/T"]
+    if force:
+        command.append("/F")
+    subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
 def _stop_proxy_process(timeout_seconds: float = 5.0) -> bool:
-    pid = _read_proxy_pid()
+    pid, _ = _read_proxy_pid()
     if pid is None:
         return False
     if not _pid_matches_proxy(pid):
         raise RuntimeError(f"Refusing to stop unexpected process from PID file: {pid}")
 
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        _remove_pid_file()
-        return False
+    if platform_support.is_windows():
+        _terminate_windows_process(pid, force=False)
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            _remove_pid_files()
+            return False
 
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            _remove_pid_file()
+        if not _is_process_running(pid):
+            _remove_pid_files()
             return True
         time.sleep(0.1)
 
-    os.kill(pid, signal.SIGKILL)
+    if platform_support.is_windows():
+        _terminate_windows_process(pid, force=True)
+    else:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            _remove_pid_files()
+            return True
     deadline = time.time() + 1.0
     while time.time() < deadline:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            _remove_pid_file()
+        if not _is_process_running(pid):
+            _remove_pid_files()
             return True
         time.sleep(0.05)
 
@@ -258,12 +343,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _has_command(command: str) -> bool:
-    return subprocess.run(
-        ["/usr/bin/env", "bash", "-lc", f"command -v {command}"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    ).returncode == 0
+    return shutil.which(command) is not None
 
 
 def _az_logged_in() -> bool:
@@ -300,32 +380,45 @@ def _start_proxy() -> None:
     _ensure_resource()
     _ensure_deployment()
     _ensure_az_login()
-    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    platform_support.ensure_private_dir(_get_pid_file().parent)
 
     print("Starting Azure OpenAI proxy...", file=sys.stderr)
-    with LOG_FILE.open("ab") as log_file:
+    with platform_support.open_private_append_binary(_get_log_file()) as log_file:
+        popen_kwargs = {
+            "stdout": log_file,
+            "stderr": subprocess.STDOUT,
+            "env": {**os.environ, CODEX_LOCAL_AUTH_ENV: ensure_local_auth_token()},
+        }
+        if platform_support.is_windows():
+            popen_kwargs["creationflags"] = (
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(subprocess, "DETACHED_PROCESS", 0)
+            )
+        else:
+            popen_kwargs["start_new_session"] = True
         process = subprocess.Popen(
             [sys.executable, "-m", "codex_azure.server"],
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            env={**os.environ, CODEX_LOCAL_AUTH_ENV: ensure_local_auth_token()},
+            **popen_kwargs,
         )
 
-    os.chmod(PID_FILE.parent, 0o700)
-    PID_FILE.write_text(f"{process.pid}\n")
-    os.chmod(PID_FILE, 0o600)
-    if not LOG_FILE.exists():
-        LOG_FILE.touch(mode=0o600)
-    else:
-        os.chmod(LOG_FILE, 0o600)
+    platform_support.write_private_text(_get_pid_file(), f"{process.pid}\n")
+    for path in platform_support.iter_proxy_pid_files():
+        if path != _get_pid_file():
+            path.unlink(missing_ok=True)
 
     for _ in range(60):
         if _is_proxy_healthy():
             return
         time.sleep(0.25)
 
-    raise RuntimeError(f"Proxy failed to start. Check {LOG_FILE}")
+    raise RuntimeError(f"Proxy failed to start. Check {_get_log_file()}")
+
+
+def _launch_codex(args: list[str]) -> None:
+    if platform_support.is_windows():
+        completed = subprocess.run(["codex", *args], check=False)
+        raise SystemExit(completed.returncode)
+    os.execvp("codex", ["codex", *args])
 
 
 def main() -> None:
@@ -342,7 +435,7 @@ def main() -> None:
     _start_proxy()
     os.environ.setdefault(CODEX_DUMMY_API_KEY_ENV, CODEX_DUMMY_API_KEY_VALUE)
     os.environ.setdefault(CODEX_LOCAL_AUTH_ENV, ensure_local_auth_token())
-    os.execvp("codex", ["codex", *remaining])
+    _launch_codex(remaining)
 
 
 if __name__ == "__main__":

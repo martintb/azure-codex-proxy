@@ -2,6 +2,8 @@
 
 Proxy service for `codex` that acquires and refreshes Azure access tokens automatically, then forwards requests to Azure OpenAI through a local OpenAI-compatible endpoint.
 
+Supported platforms: Linux, macOS, and Windows.
+
 ## Quick start
 
 Install:
@@ -16,7 +18,7 @@ Run:
 codex-azure
 ```
 
-On first run, if these are not already configured, `codex-azure` will prompt for them and store them in `~/.config/codex-azure/config.json`:
+On first run, if these are not already configured, `codex-azure` will prompt for them and store them in its per-user platform config directory:
 
 - Azure OpenAI resource URL
 - Azure OpenAI deployment name
@@ -119,7 +121,7 @@ python -m codex_azure.server
 Resource and deployment are resolved in this order:
 
 1. Environment variables
-2. Stored config in `~/.config/codex-azure/config.json`
+2. Stored config in the per-user platform config directory
 3. Interactive prompt, if stdin is a TTY
 
 If stdin is not interactive and a required value is missing, the command fails with a clear error instead of prompting.
@@ -232,10 +234,19 @@ The health endpoint returns whether the proxy can currently resolve configuratio
 
 ## Files and locations
 
-- Stored proxy config: `~/.config/codex-azure/config.json`
+- Stored proxy config:
+  - Linux: `~/.config/codex-azure/config.json`
+  - macOS: `~/Library/Application Support/codex-azure/config.json`
+  - Windows: `%APPDATA%\codex-azure\config.json`
 - Generated Codex config: `~/.codex/config.toml`
-- Background proxy PID file: `~/.cache/azure-openai-proxy.pid`
-- Background proxy log file: `~/.cache/azure-openai-proxy.log`
+- Background proxy PID file:
+  - Linux: `~/.cache/codex-azure/azure-openai-proxy.pid`
+  - macOS: `~/Library/Caches/codex-azure/azure-openai-proxy.pid`
+  - Windows: `%LOCALAPPDATA%\codex-azure\Cache\azure-openai-proxy.pid`
+- Background proxy log file:
+  - Linux: `~/.cache/codex-azure/azure-openai-proxy.log`
+  - macOS: `~/Library/Caches/codex-azure/azure-openai-proxy.log`
+  - Windows: `%LOCALAPPDATA%\codex-azure\Cache\azure-openai-proxy.log`
 
 ## How request rewriting works
 
@@ -266,7 +277,7 @@ codex-azure config show-deployment
 Check the background log:
 
 ```bash
-tail -f ~/.cache/azure-openai-proxy.log
+tail -f ~/.cache/codex-azure/azure-openai-proxy.log
 ```
 
 Also verify that the configured host and port are available.
@@ -298,7 +309,7 @@ Check:
 
 ### Codex is not found
 
-`codex-azure` launches `codex` with `os.execvp`, so `codex` must already be installed and available on your `PATH`.
+`codex-azure` launches `codex` from your `PATH`. On Unix it replaces the current process; on Windows it starts `codex` as a child process and exits with the same status code.
 
 ## Development notes
 
@@ -322,7 +333,7 @@ You can still provide the resource directly with an environment variable:
 export AZURE_OPENAI_RESOURCE="https://<your-resource>.openai.azure.com"
 ```
 
-If `AZURE_OPENAI_RESOURCE` is not set, `codex-azure` will prompt for the resource URL the first time you run it and store that value in `~/.config/codex-azure/config.json`.
+If `AZURE_OPENAI_RESOURCE` is not set, `codex-azure` will prompt for the resource URL the first time you run it and store that value in its per-user platform config directory.
 
 Azure OpenAI still requires a real deployment name. Set it with:
 
