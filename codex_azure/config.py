@@ -1,19 +1,16 @@
 import json
 import os
 import secrets
-import stat
 from pathlib import Path
 
 import tomlkit
 
+from . import platform as platform_support
 
-CONFIG_DIR = Path.home() / ".config" / "codex-azure"
-CONFIG_FILE = CONFIG_DIR / "config.json"
+
 RESOURCE_KEY = "azure_openai_resource"
 DEPLOYMENT_KEY = "azure_openai_deployment"
 LOCAL_AUTH_TOKEN_KEY = "local_auth_token"
-CODEX_CONFIG_DIR = Path.home() / ".codex"
-CODEX_CONFIG_FILE = CODEX_CONFIG_DIR / "config.toml"
 CODEX_PROVIDER_NAME = "azure-openai-proxy"
 CODEX_MODEL_NAME = "azure-openai-proxy"
 CODEX_DUMMY_API_KEY_ENV = "CODEX_AZURE_OPENAI_DUMMY_API_KEY"
@@ -23,37 +20,6 @@ DEFAULT_PROXY_BASE_URL = "http://127.0.0.1:43123/openai/v1"
 DEFAULT_STREAM_IDLE_TIMEOUT_MS = 1800000
 DEFAULT_STREAM_MAX_RETRIES = 20
 DEFAULT_REQUEST_MAX_RETRIES = 8
-OWNER_ONLY_FILE_MODE = 0o600
-OWNER_ONLY_DIR_MODE = 0o700
-
-
-def _ensure_owner_only_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(path, OWNER_ONLY_DIR_MODE)
-    except PermissionError:
-        pass
-
-
-def _write_owner_only_file(path: Path, content: str) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    fd = os.open(path, flags, OWNER_ONLY_FILE_MODE)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(content)
-    try:
-        os.chmod(path, OWNER_ONLY_FILE_MODE)
-    except PermissionError:
-        pass
-
-
-def _assert_secure_file(path: Path) -> None:
-    if not path.exists():
-        return
-    stat_result = path.stat()
-    if stat_result.st_uid != os.getuid():
-        raise RuntimeError(f"Refusing to use insecure file not owned by current user: {path}")
-    if stat_result.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise RuntimeError(f"Refusing to use writable-by-others file: {path}")
 
 
 def _normalize_resource(value: str) -> str:
@@ -75,16 +41,42 @@ def _normalize_resource(value: str) -> str:
     return normalized
 
 
+def get_config_file() -> Path:
+    return platform_support.get_proxy_config_file()
+
+
+def get_codex_config_file() -> Path:
+    return platform_support.get_codex_config_file()
+
+
+def _load_config_file(path: Path) -> dict:
+    platform_support.assert_secure_private_file(path)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _iter_config_files() -> tuple[Path, ...]:
+    paths: list[Path] = []
+    for path in (
+        platform_support.get_proxy_config_file(),
+        platform_support.get_legacy_proxy_config_file(),
+    ):
+        if path not in paths:
+            paths.append(path)
+    return tuple(paths)
+
+
 def load_config() -> dict:
-    if not CONFIG_FILE.exists():
-        return {}
-    _assert_secure_file(CONFIG_FILE)
-    return json.loads(CONFIG_FILE.read_text())
+    for path in _iter_config_files():
+        if path.exists():
+            return _load_config_file(path)
+    return {}
 
 
 def save_config(config: dict) -> None:
-    _ensure_owner_only_dir(CONFIG_DIR)
-    _write_owner_only_file(CONFIG_FILE, json.dumps(config, indent=2, sort_keys=True) + "\n")
+    platform_support.write_private_text(
+        platform_support.get_proxy_config_file(),
+        json.dumps(config, indent=2, sort_keys=True) + "\n",
+    )
 
 
 def get_stored_resource() -> str | None:
@@ -177,12 +169,14 @@ def ensure_local_auth_token() -> str:
 
 
 def update_codex_config(resource: str) -> Path:
-    normalized_resource = _normalize_resource(resource)
+    _normalize_resource(resource)
     token = ensure_local_auth_token()
     deployment = get_effective_deployment()
+    codex_config_file = platform_support.get_codex_config_file()
 
-    if CODEX_CONFIG_FILE.exists():
-        document = tomlkit.parse(CODEX_CONFIG_FILE.read_text())
+    if codex_config_file.exists():
+        platform_support.assert_secure_private_file(codex_config_file)
+        document = tomlkit.parse(codex_config_file.read_text(encoding="utf-8"))
     else:
         document = tomlkit.document()
 
@@ -219,6 +213,5 @@ def update_codex_config(resource: str) -> Path:
 
     providers[CODEX_PROVIDER_NAME] = provider
 
-    _ensure_owner_only_dir(CODEX_CONFIG_DIR)
-    _write_owner_only_file(CODEX_CONFIG_FILE, tomlkit.dumps(document))
-    return CODEX_CONFIG_FILE
+    platform_support.write_private_text(codex_config_file, tomlkit.dumps(document))
+    return codex_config_file
