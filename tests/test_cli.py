@@ -176,3 +176,24 @@ def test_read_proxy_pid_prefers_runtime_state(isolated_home, monkeypatch, load_m
 
     assert pid == 9876
     assert path == runtime_file
+
+
+def test_set_deployment_updates_managed_model_in_codex_config(isolated_home, load_module):
+    config = load_module("codex_azure.config")
+    resource = config.set_stored_resource("https://myresource.openai.azure.com")
+    config.set_stored_deployment("gpt-5.4")
+    codex_config_file = config.get_codex_config_file()
+    codex_config_file.parent.mkdir(parents=True, exist_ok=True)
+    codex_config_file.write_text(
+        """
+model = "some-other-model"
+model_provider = "azure-openai-proxy"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    cli = load_module("codex_azure.cli")
+
+    assert cli._set_deployment("gpt-5.5") == 0
+    assert codex_config_file.read_text(encoding="utf-8").splitlines()[0] == 'model = "gpt-5.5"'

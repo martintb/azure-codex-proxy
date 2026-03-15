@@ -48,8 +48,16 @@ def _get_running_proxy_base_url() -> str | None:
     return get_proxy_base_url(str(runtime_state["host"]), int(runtime_state["port"]))
 
 
-def _update_codex_proxy_config(resource: str, proxy_base_url: str | None = None) -> Path:
-    return update_codex_config(resource, proxy_base_url or _get_preferred_proxy_base_url())
+def _update_codex_proxy_config(
+    resource: str,
+    proxy_base_url: str | None = None,
+    force_model: bool = False,
+) -> Path:
+    return update_codex_config(
+        resource,
+        proxy_base_url or _get_preferred_proxy_base_url(),
+        force_model=force_model,
+    )
 
 
 def _prompt_for_resource() -> str:
@@ -137,7 +145,7 @@ def _set_deployment(value: str | None) -> int:
         value = input("Azure OpenAI deployment name: ").strip()
     deployment = set_stored_deployment(value)
     resource = _ensure_resource()
-    codex_config_path = _update_codex_proxy_config(resource)
+    codex_config_path = _update_codex_proxy_config(resource, force_model=True)
     print(f"Stored Azure OpenAI deployment: {deployment}")
     print(f"Updated Codex config: {codex_config_path}")
     return 0

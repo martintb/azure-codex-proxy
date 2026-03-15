@@ -310,7 +310,7 @@ def ensure_local_auth_token() -> str:
     return token
 
 
-def update_codex_config(resource: str, proxy_base_url: str) -> Path:
+def update_codex_config(resource: str, proxy_base_url: str, force_model: bool = False) -> Path:
     _normalize_resource(resource)
     token = ensure_local_auth_token()
     deployment = get_effective_deployment()
@@ -323,10 +323,11 @@ def update_codex_config(resource: str, proxy_base_url: str) -> Path:
         document = tomlkit.document()
 
     existing_model = document.get("model")
-    if isinstance(existing_model, str) and existing_model.strip() and existing_model != CODEX_MODEL_NAME:
-        document["model"] = existing_model.strip()
-    elif deployment:
+    normalized_model = existing_model.strip() if isinstance(existing_model, str) else None
+    if deployment and (force_model or not normalized_model or normalized_model == CODEX_MODEL_NAME):
         document["model"] = deployment
+    elif normalized_model and normalized_model != CODEX_MODEL_NAME:
+        document["model"] = normalized_model
     document["model_provider"] = CODEX_PROVIDER_NAME
 
     providers = document.get("model_providers")
