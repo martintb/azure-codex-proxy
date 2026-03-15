@@ -9,6 +9,9 @@ def isolated_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
     monkeypatch.delenv("AZURE_OPENAI_RESOURCE", raising=False)
     monkeypatch.delenv("AZURE_OPENAI_DEPLOYMENT", raising=False)
     monkeypatch.delenv("CODEX_AZURE_PROXY_AUTH_TOKEN", raising=False)
