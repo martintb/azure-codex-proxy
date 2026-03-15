@@ -171,10 +171,10 @@ codex-azure config clear-deployment
 
 When you run `codex-azure config set-resource` or `codex-azure config set-deployment`, the tool updates `~/.codex/config.toml` without deleting unrelated TOML content.
 
-It ensures Codex points at the local proxy using a local alias:
+It ensures Codex points at the local proxy while keeping a real Codex model name:
 
 ```toml
-model = "azure-openai-proxy"
+model = "gpt-5.4"
 model_provider = "azure-openai-proxy"
 
 [model_providers.azure-openai-proxy]
@@ -190,8 +190,8 @@ request_max_retries = 8
 
 Important details:
 
-- The local alias `azure-openai-proxy` is only for Codex configuration.
-- The proxy rewrites that alias to your real Azure deployment before forwarding the request.
+- Codex keeps using a real model name like `gpt-5.4`, so built-in model metadata still applies.
+- The proxy rewrites supported local model names to your real Azure deployment before forwarding the request.
 - `codex-azure` exports a dummy value for `CODEX_AZURE_OPENAI_DUMMY_API_KEY` before launching `codex`, because authentication is handled by the local proxy rather than a static OpenAI-style API key.
 - Existing unrelated keys and tables in `~/.codex/config.toml` are preserved.
 
@@ -230,13 +230,13 @@ The health endpoint returns whether the proxy can currently resolve configuratio
 
 ## How request rewriting works
 
-Codex is configured to use the model name `azure-openai-proxy` locally.
+Codex is configured to use a real model name such as `gpt-5.4` locally.
 
-Before forwarding a JSON request upstream, the proxy checks the request body. If the request model matches that local alias, it rewrites the `model` field to your configured Azure deployment name.
+Before forwarding a JSON request upstream, the proxy checks the request body. If the request model matches a supported local model name, it rewrites the `model` field to your configured Azure deployment name.
 
 That means:
 
-- Codex can keep using a stable local model alias
+- Codex can keep using built-in model metadata and defaults
 - Azure still receives the real deployment name it expects
 
 ## Troubleshooting
@@ -329,12 +329,12 @@ codex-azure config set-deployment gpt-5.4
 
 If `AZURE_OPENAI_DEPLOYMENT` is not set, `codex-azure` will also prompt for the deployment name on first run and store it in the same config file.
 
-The local alias `azure-openai-proxy` is only used inside Codex config; the proxy rewrites that alias to your configured Azure deployment before forwarding requests upstream.
+The proxy provider is only used inside Codex config; the proxy rewrites supported local model names to your configured Azure deployment before forwarding requests upstream.
 
 When you run `codex-azure config set-resource`, it also updates `~/.codex/config.toml` without deleting unrelated TOML. It ensures these settings exist:
 
 ```toml
-model = "azure-openai-proxy"
+model = "gpt-5.4"
 model_provider = "azure-openai-proxy"
 
 [model_providers.azure-openai-proxy]

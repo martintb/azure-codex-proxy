@@ -11,7 +11,8 @@ RESOURCE_KEY = "azure_openai_resource"
 CODEX_CONFIG_DIR = Path.home() / ".codex"
 CODEX_CONFIG_FILE = CODEX_CONFIG_DIR / "config.toml"
 CODEX_PROVIDER_NAME = "azure-openai-proxy"
-CODEX_MODEL_NAME = "azure-openai-proxy"
+CODEX_MODEL_NAME = "gpt-5.4"
+CODEX_MODEL_ALIAS = "azure-openai-proxy"
 CODEX_DUMMY_API_KEY_ENV = "CODEX_AZURE_OPENAI_DUMMY_API_KEY"
 CODEX_DUMMY_API_KEY_VALUE = "azure-openai-proxy"
 DEFAULT_PROXY_BASE_URL = "http://127.0.0.1:43123/openai/v1"
@@ -113,8 +114,7 @@ def update_codex_config(resource: str) -> Path:
     if CODEX_CONFIG_FILE.exists():
         document = tomlkit.parse(CODEX_CONFIG_FILE.read_text())
 
-    configured_deployment = get_effective_deployment()
-    document["model"] = configured_deployment or CODEX_MODEL_NAME
+    document["model"] = CODEX_MODEL_NAME
     document["model_provider"] = CODEX_PROVIDER_NAME
 
     profile_name = document.get("profile")
@@ -122,11 +122,13 @@ def update_codex_config(resource: str) -> Path:
         profiles = document.get("profiles")
         if isinstance(profiles, dict):
             profile = profiles.get(profile_name)
-            if isinstance(profile, dict) and profile.get("model_provider") == "azure":
-                profile["model_provider"] = CODEX_PROVIDER_NAME
-                if profile.get("model") == "gpt-5.4" and configured_deployment:
-                    profile["model"] = configured_deployment
-                elif profile.get("model") == "gpt-5.4":
+            if isinstance(profile, dict):
+                if profile.get("model_provider") in {"azure", CODEX_PROVIDER_NAME}:
+                    profile["model_provider"] = CODEX_PROVIDER_NAME
+                if profile.get("model_provider") == CODEX_PROVIDER_NAME and profile.get("model") in {
+                    CODEX_MODEL_NAME,
+                    CODEX_MODEL_ALIAS,
+                }:
                     profile["model"] = CODEX_MODEL_NAME
 
     model_providers = document.get("model_providers")

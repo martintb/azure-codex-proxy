@@ -14,7 +14,12 @@ from azure.identity import (
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from .config import CODEX_MODEL_NAME, get_effective_deployment, get_effective_resource
+from .config import (
+    CODEX_MODEL_ALIAS,
+    CODEX_MODEL_NAME,
+    get_effective_deployment,
+    get_effective_resource,
+)
 
 
 AZURE_SCOPE = os.environ.get(
@@ -73,7 +78,10 @@ def rewrite_request_body(body: bytes, content_type: str) -> bytes:
     except json.JSONDecodeError:
         return body
 
-    if isinstance(payload, dict) and payload.get("model") == CODEX_MODEL_NAME:
+    if isinstance(payload, dict) and payload.get("model") in {
+        CODEX_MODEL_ALIAS,
+        CODEX_MODEL_NAME,
+    }:
         payload["model"] = deployment
         return json.dumps(payload).encode("utf-8")
 
