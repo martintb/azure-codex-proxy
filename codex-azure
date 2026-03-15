@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROXY_HOST="${AZURE_OPENAI_PROXY_HOST:-127.0.0.1}"
+PROXY_PORT="${AZURE_OPENAI_PROXY_PORT:-4000}"
+PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
+PROXY_SCRIPT="${HOME}/bin/azure_openai_proxy.py"
+PID_FILE="${HOME}/.cache/azure-openai-proxy.pid"
+LOG_FILE="${HOME}/.cache/azure-openai-proxy.log"
+
+mkdir -p "${HOME}/.cache"
+
+has_az() {
+  command -v az >/dev/null 2>&1
+}
+
+az_logged_in() {
+  az account show >/dev/null 2>&1
+}
+
+is_proxy_healthy() {
+  curl -fsS "${PROXY_URL}/healthz" >/dev/null 2>&1
+}
+
+ensure_az_login() {
+  if has_az && ! az_logged_in; then
+    echo "Azure CLI detected but not logged in; running az login..." >&2
+    az login >/dev/null
+  fi
+}
+
+start_proxy() {
+  if is_proxy_healthy; then
+    return 0
+  fi
+
+  ensure_az_login
+
+  echo "Starting Azure OpenAI proxy..." >&2
+  nohup python3 "${PROXY_SCRIPT}" >>"${LOG_FILE}" 2>&1 &
+  echo $! > "${PID_FILE}"
+
+  for _ in $(seq 1 60); do
+    if is_proxy_healthy; then
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  echo "Proxy failed to start. Check ${LOG_FILE}" >&2
+  exit 1
+}
+
+start_proxy
+exec codex "$@"
