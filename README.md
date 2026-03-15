@@ -6,15 +6,15 @@ Supported platforms: Linux, macOS, and Windows.
 
 ## Quick start
 
-Install:
-
 Install Codex first by following the official [Codex CLI setup guide](https://developers.openai.com/codex/cli).
+
+The install this package using pip:
 
 ```bash
 pip install git+https://github.com/tbm/azure-codex-proxy.git
 ```
 
-Once installed, you should be able to start the codex session via
+Once installed, you should be able to start the codex session via:
 
 Run:
 
@@ -24,13 +24,13 @@ codex-azure
 
 On first run, if these are not already configured, `codex-azure` will prompt for them and store them in its per-user platform config directory:
 
-- Azure OpenAI resource URL
-- Azure OpenAI deployment name
+- Azure OpenAI resource URL (e.g., "https://<your-resource>.cognitiveservices.azure.com")
+- Azure OpenAI deployment name (e.g., "gpt-5.4")
 
 You can also set them explicitly with environment variables:
 
 ```bash
-export AZURE_OPENAI_RESOURCE="https://<your-resource>.openai.azure.com"
+export AZURE_OPENAI_RESOURCE="https://<your-resource>.cognitiveservices.azure.com"
 export AZURE_OPENAI_DEPLOYMENT="gpt-5.4"
 ```
 
