@@ -31,6 +31,11 @@ from .config import (
 from . import platform as platform_support
 
 
+CODEX_INSTALL_URL = "https://developers.openai.com/codex/cli"
+CODEX_INSTALL_COMMAND = "npm i -g @openai/codex"
+PROXY_LOG_TAIL_BYTES = 8192
+
+
 def _get_preferred_proxy_base_url() -> str:
     host, port = get_preferred_proxy_endpoint()
     return get_proxy_base_url(host, port)
@@ -381,6 +386,19 @@ def _has_command(command: str) -> bool:
     return shutil.which(command) is not None
 
 
+def _codex_not_installed_message() -> str:
+    return (
+        "`codex` was not found on PATH. Install the Codex CLI with "
+        f"`{CODEX_INSTALL_COMMAND}`, then rerun `codex-azure`. See {CODEX_INSTALL_URL}."
+    )
+
+
+def _ensure_codex_installed() -> None:
+    if _has_command("codex"):
+        return
+    raise RuntimeError(_codex_not_installed_message())
+
+
 def _az_logged_in() -> bool:
     return subprocess.run(
         ["az", "account", "show"],
@@ -391,9 +409,68 @@ def _az_logged_in() -> bool:
 
 
 def _ensure_az_login() -> None:
-    if _has_command("az") and not _az_logged_in():
-        print("Azure CLI detected but not logged in; running az login...", file=sys.stderr)
-        subprocess.run(["az", "login"], check=True)
+    if not _has_command("az"):
+        raise RuntimeError(
+            "Azure CLI (`az`) is required for authentication. Install Azure CLI, run "
+            "`az login --use-device-code`, then rerun `codex-azure`."
+        )
+    if _az_logged_in():
+        return
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "Azure CLI is installed but not logged in, and stdin is not interactive. Run "
+            "`az login --use-device-code` in an interactive terminal on this machine, then "
+            "rerun `codex-azure`."
+        )
+
+    print(
+        "Azure CLI is installed but not logged in. Running `az login --use-device-code` so "
+        "sign-in works in SSH and VS Code terminals...",
+        file=sys.stderr,
+    )
+    try:
+        subprocess.run(["az", "login", "--use-device-code"], check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "Azure CLI login did not complete successfully. Rerun `az login --use-device-code` "
+            "in this terminal, then rerun `codex-azure`."
+        ) from exc
+
+
+def _read_proxy_log_tail(max_bytes: int = PROXY_LOG_TAIL_BYTES) -> str:
+    log_path = _get_log_file()
+    if not log_path.exists():
+        return ""
+    try:
+        platform_support.assert_secure_private_file(log_path)
+        with log_path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(size - max_bytes, 0), os.SEEK_SET)
+            return handle.read().decode("utf-8", errors="ignore")
+    except (OSError, RuntimeError):
+        return ""
+
+
+def _classify_proxy_start_failure() -> str | None:
+    log_tail = _read_proxy_log_tail()
+    if not log_tail:
+        return None
+
+    normalized = log_tail.lower()
+    auth_markers = (
+        "azure authentication failed during proxy startup",
+        "azureclicredential",
+        "please run 'az login'",
+        'please run "az login"',
+    )
+    if any(marker in normalized for marker in auth_markers):
+        return (
+            "Proxy could not obtain an Azure token. For SSH or VS Code terminals, run "
+            "`az login --use-device-code` in this terminal and retry."
+        )
+
+    return None
 
 
 def _clear_stale_runtime_proxy_state() -> None:
@@ -468,33 +545,43 @@ def _start_proxy() -> None:
             break
         time.sleep(0.25)
 
+    detail = _classify_proxy_start_failure()
+    if detail:
+        raise RuntimeError(f"{detail} Full log: {_get_log_file()}")
     if process.poll() is None:
         raise RuntimeError(f"Proxy failed to start. Check {_get_log_file()}")
     raise RuntimeError(f"Proxy exited before it became healthy. Check {_get_log_file()}")
 
 
 def _launch_codex(args: list[str]) -> None:
-    if platform_support.is_windows():
-        completed = subprocess.run(["codex", *args], check=False)
-        raise SystemExit(completed.returncode)
-    os.execvp("codex", ["codex", *args])
+    try:
+        if platform_support.is_windows():
+            completed = subprocess.run(["codex", *args], check=False)
+            raise SystemExit(completed.returncode)
+        os.execvp("codex", ["codex", *args])
+    except FileNotFoundError as exc:
+        raise RuntimeError(_codex_not_installed_message()) from exc
 
 
 def main() -> None:
     parser = _build_parser()
     args, remaining = parser.parse_known_args()
+    try:
+        if getattr(args, "handler", None) is not None:
+            raise SystemExit(args.handler(args))
 
-    if getattr(args, "handler", None) is not None:
-        raise SystemExit(args.handler(args))
+        if args.command is not None:
+            parser.print_help(sys.stderr)
+            raise SystemExit(2)
 
-    if args.command is not None:
-        parser.print_help(sys.stderr)
-        raise SystemExit(2)
-
-    _start_proxy()
-    os.environ.setdefault(CODEX_DUMMY_API_KEY_ENV, CODEX_DUMMY_API_KEY_VALUE)
-    os.environ.setdefault(CODEX_LOCAL_AUTH_ENV, ensure_local_auth_token())
-    _launch_codex(remaining)
+        _ensure_codex_installed()
+        _start_proxy()
+        os.environ.setdefault(CODEX_DUMMY_API_KEY_ENV, CODEX_DUMMY_API_KEY_VALUE)
+        os.environ.setdefault(CODEX_LOCAL_AUTH_ENV, ensure_local_auth_token())
+        _launch_codex(remaining)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

@@ -25,6 +25,14 @@ def test_has_command_uses_shutil_which(isolated_home, monkeypatch, load_module):
     assert calls == ["az"]
 
 
+def test_ensure_codex_installed_raises_helpful_error(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+    monkeypatch.setattr(cli, "_has_command", lambda command: False)
+
+    with pytest.raises(RuntimeError, match="`codex` was not found on PATH"):
+        cli._ensure_codex_installed()
+
+
 def test_cli_import_does_not_import_app_module(isolated_home, load_module):
     cli = load_module("codex_azure.cli")
 
@@ -114,6 +122,71 @@ def test_start_proxy_writes_pid_file_to_native_cache_dir(isolated_home, monkeypa
         assert kwargs["start_new_session"] is True
 
 
+def test_start_proxy_reports_auth_guidance_from_log(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+    log_file = cli.platform_support.get_proxy_log_file()
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text(
+        "ERROR Azure authentication failed during proxy startup: Please run 'az login' to set up an account\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cli, "_is_proxy_healthy", lambda host=None, port=None: False)
+    monkeypatch.setattr(cli, "_ensure_resource", lambda: "https://myresource.openai.azure.com")
+    monkeypatch.setattr(cli, "_ensure_deployment", lambda: "gpt-5")
+    monkeypatch.setattr(cli, "_ensure_az_login", lambda: None)
+    monkeypatch.setattr(cli, "ensure_local_auth_token", lambda: "secret")
+    monkeypatch.setattr(cli, "load_proxy_runtime_state", lambda: None)
+    monkeypatch.setattr(cli.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        cli.subprocess,
+        "Popen",
+        lambda *args, **kwargs: SimpleNamespace(pid=1234, poll=lambda: 1),
+    )
+
+    with pytest.raises(RuntimeError, match="az login --use-device-code"):
+        cli._start_proxy()
+
+
+def test_start_proxy_reports_generic_log_error_when_unclassified(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+    log_file = cli.platform_support.get_proxy_log_file()
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text("plain startup failure\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "_is_proxy_healthy", lambda host=None, port=None: False)
+    monkeypatch.setattr(cli, "_ensure_resource", lambda: "https://myresource.openai.azure.com")
+    monkeypatch.setattr(cli, "_ensure_deployment", lambda: "gpt-5")
+    monkeypatch.setattr(cli, "_ensure_az_login", lambda: None)
+    monkeypatch.setattr(cli, "ensure_local_auth_token", lambda: "secret")
+    monkeypatch.setattr(cli, "load_proxy_runtime_state", lambda: None)
+    monkeypatch.setattr(cli.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        cli.subprocess,
+        "Popen",
+        lambda *args, **kwargs: SimpleNamespace(pid=1234, poll=lambda: 1),
+    )
+
+    with pytest.raises(RuntimeError, match="Proxy exited before it became healthy"):
+        cli._start_proxy()
+
+
+def test_main_checks_for_codex_before_starting_proxy(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+    parser = SimpleNamespace(parse_known_args=lambda: (SimpleNamespace(command=None, handler=None), []))
+    start_calls = []
+
+    monkeypatch.setattr(cli, "_build_parser", lambda: parser)
+    monkeypatch.setattr(cli, "_ensure_codex_installed", lambda: (_ for _ in ()).throw(RuntimeError("missing codex")))
+    monkeypatch.setattr(cli, "_start_proxy", lambda: start_calls.append("started"))
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main()
+
+    assert excinfo.value.code == 1
+    assert start_calls == []
+
+
 def test_launch_codex_execs_on_posix(isolated_home, monkeypatch, load_module):
     cli = load_module("codex_azure.cli")
     monkeypatch.setattr(cli.platform_support, "is_windows", lambda: False)
@@ -142,6 +215,15 @@ def test_launch_codex_returns_child_status_on_windows(isolated_home, monkeypatch
         cli._launch_codex(["chat"])
 
     assert excinfo.value.code == 7
+
+
+def test_launch_codex_raises_helpful_error_when_missing(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+    monkeypatch.setattr(cli.platform_support, "is_windows", lambda: False)
+    monkeypatch.setattr(cli.os, "execvp", lambda command, args: (_ for _ in ()).throw(FileNotFoundError("missing")))
+
+    with pytest.raises(RuntimeError, match="`codex` was not found on PATH"):
+        cli._launch_codex(["chat"])
 
 
 def test_stop_proxy_uses_taskkill_on_windows(isolated_home, monkeypatch, load_module):
@@ -205,3 +287,52 @@ model_provider = "azure-openai-proxy"
 
     assert cli._set_deployment("gpt-5.5") == 0
     assert codex_config_file.read_text(encoding="utf-8").splitlines()[0] == 'model = "gpt-5.5"'
+
+
+def test_ensure_az_login_requires_azure_cli(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+    monkeypatch.setattr(cli, "_has_command", lambda command: False)
+
+    with pytest.raises(RuntimeError, match="Azure CLI \\(`az`\\) is required"):
+        cli._ensure_az_login()
+
+
+def test_ensure_az_login_runs_device_code_flow_for_tty(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+    run_calls = []
+
+    monkeypatch.setattr(cli, "_has_command", lambda command: True)
+    monkeypatch.setattr(cli, "_az_logged_in", lambda: False)
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(cli.subprocess, "run", lambda args, check=True: run_calls.append((args, check)))
+
+    cli._ensure_az_login()
+
+    assert run_calls == [(["az", "login", "--use-device-code"], True)]
+
+
+def test_ensure_az_login_requires_interactive_terminal_when_logged_out(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+
+    monkeypatch.setattr(cli, "_has_command", lambda command: True)
+    monkeypatch.setattr(cli, "_az_logged_in", lambda: False)
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: False))
+
+    with pytest.raises(RuntimeError, match="stdin is not interactive"):
+        cli._ensure_az_login()
+
+
+def test_ensure_az_login_reports_failed_device_code_flow(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+
+    monkeypatch.setattr(cli, "_has_command", lambda command: True)
+    monkeypatch.setattr(cli, "_az_logged_in", lambda: False)
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(
+        cli.subprocess,
+        "run",
+        lambda args, check=True: (_ for _ in ()).throw(cli.subprocess.CalledProcessError(1, args)),
+    )
+
+    with pytest.raises(RuntimeError, match="Azure CLI login did not complete successfully"):
+        cli._ensure_az_login()

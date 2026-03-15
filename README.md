@@ -7,7 +7,7 @@ Supported platforms: Linux, macOS, and Windows.
 ## Requirements
 
 - `uv` installed. See Astral's [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/).
-- `codex` installed and available on your `PATH`. Follow the official [Codex CLI setup guide](https://developers.openai.com/codex/cli).
+- `codex` installed and available on your `PATH`. Install it with `npm i -g @openai/codex` and see the official [Codex CLI setup guide](https://developers.openai.com/codex/cli).
 - Access to an Azure OpenAI resource and deployment
 - If not using uv: Python 3.13+ if you plan to run the project from source
 
@@ -23,6 +23,12 @@ Then start Codex through the local Azure proxy:
 
 ```bash
 codex-azure
+```
+
+If you are on a remote machine, in plain SSH, or in a VS Code terminal, authenticate Azure CLI in that same terminal first:
+
+```bash
+az login --use-device-code
 ```
 
 On first run, if these are not already configured, `codex-azure` prompts for them and stores them in its per-user platform config directory:
@@ -201,18 +207,15 @@ Important details:
 
 ## Authentication behavior
 
-The proxy uses Azure Identity with this credential chain:
-
-1. `AzureCliCredential`
-2. `InteractiveBrowserCredential`
-
-The CLI also checks whether Azure CLI is installed and already logged in. If `az` is available but not logged in, it runs:
+The proxy uses `AzureCliCredential`, which relies on an existing Azure CLI sign-in. The CLI checks whether Azure CLI is installed and already logged in. If `az` is available but not logged in, it runs:
 
 ```bash
-az login
+az login --use-device-code
 ```
 
-If Azure CLI authentication is not available, the proxy can still fall back to an interactive browser login through Azure Identity.
+This works in regular terminals, bare SSH sessions, and VS Code remote terminals without needing browser forwarding. If stdin is not interactive, `codex-azure` tells you to run that command manually first.
+
+If `codex` is missing from `PATH`, `codex-azure` exits early with an install hint pointing to the Codex CLI guide. Codex CLI currently supports macOS and Linux directly; on Windows, the official docs describe support as experimental and recommend WSL when possible.
 
 ## Local endpoints
 

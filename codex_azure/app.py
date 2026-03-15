@@ -9,8 +9,6 @@ from typing import Optional
 import httpx
 from azure.identity import (
     AzureCliCredential,
-    ChainedTokenCredential,
-    InteractiveBrowserCredential,
 )
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
@@ -42,10 +40,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("azure-openai-proxy")
 
 
-credential = ChainedTokenCredential(
-    AzureCliCredential(),
-    InteractiveBrowserCredential(),
-)
+credential = AzureCliCredential()
 
 _token_value: Optional[str] = None
 _token_expires_on: float = 0.0
@@ -224,7 +219,11 @@ async def lifespan(_: FastAPI):
     global http_client, local_auth_token
     http_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0))
     local_auth_token = ensure_local_auth_token()
-    await get_valid_token(force_refresh=False)
+    try:
+        await get_valid_token(force_refresh=False)
+    except Exception as exc:
+        log.error("Azure authentication failed during proxy startup: %s", exc)
+        raise
     try:
         yield
     finally:
