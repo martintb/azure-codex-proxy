@@ -6,9 +6,6 @@ resolution-markers = [
     "sys_platform != 'win32'",
 ]
 
-[options]
-prerelease-mode = "allow"
-
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -305,7 +302,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "azure-cli", specifier = ">=2.84" },
+    { name = "azure-cli", specifier = ">=2.84.0b1" },
     { name = "azure-identity" },
     { name = "fastapi" },
     { name = "httpx", specifier = ">=0.28.1,<0.29a0" },
