@@ -56,18 +56,31 @@ def test_start_proxy_writes_pid_file_to_native_cache_dir(isolated_home, monkeypa
     legacy_pid_file.write_text("99\n", encoding="utf-8")
 
     cli = load_module("codex_azure.cli")
-    health_checks = iter([False, True])
     popen_calls = []
+    codex_config_calls = []
+    runtime_states = iter(
+        [
+            None,
+            None,
+            {"pid": 1234, "host": "127.0.0.1", "port": 51234},
+        ]
+    )
 
-    monkeypatch.setattr(cli, "_is_proxy_healthy", lambda: next(health_checks))
+    monkeypatch.setattr(cli, "_is_proxy_healthy", lambda host=None, port=None: (host, port) == ("127.0.0.1", 51234))
     monkeypatch.setattr(cli, "_ensure_resource", lambda: "https://myresource.openai.azure.com")
     monkeypatch.setattr(cli, "_ensure_deployment", lambda: "gpt-5")
     monkeypatch.setattr(cli, "_ensure_az_login", lambda: None)
     monkeypatch.setattr(cli, "ensure_local_auth_token", lambda: "secret")
+    monkeypatch.setattr(cli, "load_proxy_runtime_state", lambda: next(runtime_states))
+    monkeypatch.setattr(
+        cli,
+        "_update_codex_proxy_config",
+        lambda resource, proxy_base_url=None: codex_config_calls.append((resource, proxy_base_url)),
+    )
 
     def fake_popen(args, **kwargs):
         popen_calls.append((args, kwargs))
-        return SimpleNamespace(pid=1234)
+        return SimpleNamespace(pid=1234, poll=lambda: None)
 
     monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
 
@@ -78,6 +91,9 @@ def test_start_proxy_writes_pid_file_to_native_cache_dir(isolated_home, monkeypa
     assert pid_file.read_text(encoding="utf-8") == "1234\n"
     assert log_file.exists()
     assert not legacy_pid_file.exists()
+    assert codex_config_calls == [
+        ("https://myresource.openai.azure.com", "http://127.0.0.1:51234/openai/v1")
+    ]
 
     _, kwargs = popen_calls[0]
     assert kwargs["env"][cli.CODEX_LOCAL_AUTH_ENV] == "secret"
@@ -137,3 +153,26 @@ def test_stop_proxy_uses_taskkill_on_windows(isolated_home, monkeypatch, load_mo
 
     assert cli._stop_proxy_process(timeout_seconds=0.1) is True
     assert taskkill_calls == [(123, False), ("removed", None)]
+
+
+def test_read_proxy_pid_prefers_runtime_state(isolated_home, monkeypatch, load_module):
+    platform_module = load_module("codex_azure.platform")
+    monkeypatch.setattr(
+        platform_module,
+        "_platform_dirs",
+        lambda: FakeDirs(isolated_home / "native-config", isolated_home / "native-cache"),
+    )
+
+    runtime_file = platform_module.get_proxy_runtime_file()
+    runtime_file.parent.mkdir(parents=True, exist_ok=True)
+    runtime_file.write_text('{"version": 1, "pid": 9876, "host": "127.0.0.1", "port": 45678}\n', encoding="utf-8")
+
+    legacy_pid_file = platform_module.get_legacy_proxy_pid_file()
+    legacy_pid_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy_pid_file.write_text("4321\n", encoding="utf-8")
+
+    cli = load_module("codex_azure.cli")
+    pid, path = cli._read_proxy_pid()
+
+    assert pid == 9876
+    assert path == runtime_file

@@ -19,6 +19,8 @@ from .config import (
     CODEX_MODEL_NAME,
     ensure_local_auth_token,
     get_effective_deployment,
+    get_effective_proxy_host,
+    get_effective_proxy_port,
     get_effective_resource,
 )
 
@@ -30,8 +32,8 @@ AZURE_SCOPE = os.environ.get(
 TOKEN_REFRESH_SKEW_SECONDS = int(
     os.environ.get("AZURE_OPENAI_TOKEN_REFRESH_SKEW_SECONDS", "300")
 )
-PROXY_HOST = os.environ.get("AZURE_OPENAI_PROXY_HOST", "127.0.0.1")
-PROXY_PORT = int(os.environ.get("AZURE_OPENAI_PROXY_PORT", "43123"))
+PROXY_HOST = get_effective_proxy_host()
+PROXY_PORT = get_effective_proxy_port()
 MAX_REQUEST_BODY_BYTES = int(os.environ.get("AZURE_OPENAI_PROXY_MAX_BODY_BYTES", str(10 * 1024 * 1024)))
 ALLOWED_METHODS = {"GET", "POST", "DELETE"}
 LOCAL_AUTH_HEADER = "x-codex-proxy-auth"
@@ -223,7 +225,6 @@ async def lifespan(_: FastAPI):
     http_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0))
     local_auth_token = ensure_local_auth_token()
     await get_valid_token(force_refresh=False)
-    log.info("Proxy ready on http://%s:%s", PROXY_HOST, PROXY_PORT)
     try:
         yield
     finally:

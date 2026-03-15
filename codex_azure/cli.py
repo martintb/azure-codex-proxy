@@ -9,16 +9,21 @@ from pathlib import Path
 
 import httpx
 
-from .app import LOCAL_AUTH_HEADER, PROXY_HOST, PROXY_PORT
+from .app import LOCAL_AUTH_HEADER
 from .config import (
     CODEX_DUMMY_API_KEY_ENV,
     CODEX_DUMMY_API_KEY_VALUE,
     CODEX_LOCAL_AUTH_ENV,
+    clear_proxy_runtime_state,
     clear_stored_deployment,
     clear_stored_resource,
     ensure_local_auth_token,
     get_effective_deployment,
     get_effective_resource,
+    get_preferred_proxy_endpoint,
+    get_proxy_base_url,
+    get_proxy_health_url,
+    load_proxy_runtime_state,
     set_stored_deployment,
     set_stored_resource,
     update_codex_config,
@@ -26,7 +31,25 @@ from .config import (
 from . import platform as platform_support
 
 
-PROXY_URL = f"http://{PROXY_HOST}:{PROXY_PORT}"
+def _get_preferred_proxy_base_url() -> str:
+    host, port = get_preferred_proxy_endpoint()
+    return get_proxy_base_url(host, port)
+
+
+def _get_preferred_proxy_health_url() -> str:
+    host, port = get_preferred_proxy_endpoint()
+    return get_proxy_health_url(host, port)
+
+
+def _get_running_proxy_base_url() -> str | None:
+    runtime_state = load_proxy_runtime_state()
+    if runtime_state is None:
+        return None
+    return get_proxy_base_url(str(runtime_state["host"]), int(runtime_state["port"]))
+
+
+def _update_codex_proxy_config(resource: str, proxy_base_url: str | None = None) -> Path:
+    return update_codex_config(resource, proxy_base_url or _get_preferred_proxy_base_url())
 
 
 def _prompt_for_resource() -> str:
@@ -72,7 +95,7 @@ def _ensure_deployment() -> str:
     print("Azure OpenAI deployment is not configured.", file=sys.stderr)
     deployment = _prompt_for_deployment()
     resource = _ensure_resource()
-    update_codex_config(resource)
+    _update_codex_proxy_config(resource)
     print(f"Stored Azure OpenAI deployment: {deployment}", file=sys.stderr)
     return deployment
 
@@ -101,7 +124,7 @@ def _set_resource(value: str | None) -> int:
             raise RuntimeError("A resource URL is required when stdin is not interactive.")
         value = input("Azure OpenAI resource URL: ").strip()
     resource = set_stored_resource(value)
-    codex_config_path = update_codex_config(resource)
+    codex_config_path = _update_codex_proxy_config(resource)
     print(f"Stored Azure OpenAI resource: {resource}")
     print(f"Updated Codex config: {codex_config_path}")
     return 0
@@ -114,7 +137,7 @@ def _set_deployment(value: str | None) -> int:
         value = input("Azure OpenAI deployment name: ").strip()
     deployment = set_stored_deployment(value)
     resource = _ensure_resource()
-    codex_config_path = update_codex_config(resource)
+    codex_config_path = _update_codex_proxy_config(resource)
     print(f"Stored Azure OpenAI deployment: {deployment}")
     print(f"Updated Codex config: {codex_config_path}")
     return 0
@@ -130,7 +153,7 @@ def _clear_deployment() -> int:
     clear_stored_deployment()
     resource = get_effective_resource()
     if resource:
-        update_codex_config(resource)
+        _update_codex_proxy_config(resource)
     print("Cleared stored Azure OpenAI deployment.")
     return 0
 
@@ -144,6 +167,7 @@ def _get_log_file() -> Path:
 
 
 def _remove_pid_files() -> None:
+    clear_proxy_runtime_state()
     for path in platform_support.iter_proxy_pid_files():
         path.unlink(missing_ok=True)
 
@@ -158,6 +182,9 @@ def _read_pid_from_file(path: Path) -> int | None:
 
 
 def _read_proxy_pid() -> tuple[int | None, Path | None]:
+    runtime_state = load_proxy_runtime_state()
+    if runtime_state is not None:
+        return int(runtime_state["pid"]), platform_support.get_proxy_runtime_file()
     for path in platform_support.iter_proxy_pid_files():
         if not path.exists():
             continue
@@ -247,7 +274,7 @@ def _stop_proxy_process(timeout_seconds: float = 5.0) -> bool:
     if pid is None:
         return False
     if not _pid_matches_proxy(pid):
-        raise RuntimeError(f"Refusing to stop unexpected process from PID file: {pid}")
+        raise RuntimeError(f"Refusing to stop unexpected process from proxy state file: {pid}")
 
     if platform_support.is_windows():
         _terminate_windows_process(pid, force=False)
@@ -290,7 +317,7 @@ def _stop_proxy() -> int:
         return 0
     if _is_proxy_healthy():
         raise RuntimeError(
-            f"Proxy is still healthy at {PROXY_URL}, but no matching PID file was usable. Stop it manually."
+            f"Proxy is still healthy at {_get_preferred_proxy_health_url()}, but no matching PID file was usable. Stop it manually."
         )
     print("Azure OpenAI proxy is not running.")
     return 0
@@ -361,10 +388,20 @@ def _ensure_az_login() -> None:
         subprocess.run(["az", "login"], check=True)
 
 
-def _is_proxy_healthy() -> bool:
+def _clear_stale_runtime_proxy_state() -> None:
+    runtime_state = load_proxy_runtime_state()
+    if runtime_state is None:
+        return
+    if not _is_process_running(int(runtime_state["pid"])):
+        clear_proxy_runtime_state()
+
+
+def _is_proxy_healthy(host: str | None = None, port: int | None = None) -> bool:
+    if host is None or port is None:
+        host, port = get_preferred_proxy_endpoint()
     try:
         response = httpx.get(
-            f"{PROXY_URL}/healthz",
+            get_proxy_health_url(host, port),
             timeout=1.0,
             headers={LOCAL_AUTH_HEADER: ensure_local_auth_token()},
         )
@@ -374,10 +411,15 @@ def _is_proxy_healthy() -> bool:
 
 
 def _start_proxy() -> None:
+    _clear_stale_runtime_proxy_state()
     if _is_proxy_healthy():
+        proxy_base_url = _get_running_proxy_base_url() or _get_preferred_proxy_base_url()
+        resource = get_effective_resource()
+        if resource:
+            _update_codex_proxy_config(resource, proxy_base_url)
         return
 
-    _ensure_resource()
+    resource = _ensure_resource()
     _ensure_deployment()
     _ensure_az_login()
     platform_support.ensure_private_dir(_get_pid_file().parent)
@@ -407,11 +449,20 @@ def _start_proxy() -> None:
             path.unlink(missing_ok=True)
 
     for _ in range(60):
-        if _is_proxy_healthy():
-            return
+        runtime_state = load_proxy_runtime_state()
+        if runtime_state is not None and int(runtime_state["pid"]) == process.pid:
+            host = str(runtime_state["host"])
+            port = int(runtime_state["port"])
+            if _is_proxy_healthy(host, port):
+                _update_codex_proxy_config(resource, get_proxy_base_url(host, port))
+                return
+        if process.poll() is not None:
+            break
         time.sleep(0.25)
 
-    raise RuntimeError(f"Proxy failed to start. Check {_get_log_file()}")
+    if process.poll() is None:
+        raise RuntimeError(f"Proxy failed to start. Check {_get_log_file()}")
+    raise RuntimeError(f"Proxy exited before it became healthy. Check {_get_log_file()}")
 
 
 def _launch_codex(args: list[str]) -> None:

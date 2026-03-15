@@ -16,7 +16,10 @@ CODEX_MODEL_NAME = "azure-openai-proxy"
 CODEX_DUMMY_API_KEY_ENV = "CODEX_AZURE_OPENAI_DUMMY_API_KEY"
 CODEX_DUMMY_API_KEY_VALUE = "azure-openai-proxy"
 CODEX_LOCAL_AUTH_ENV = "CODEX_AZURE_PROXY_AUTH_TOKEN"
-DEFAULT_PROXY_BASE_URL = "http://127.0.0.1:43123/openai/v1"
+DEFAULT_PROXY_HOST = "127.0.0.1"
+DEFAULT_PROXY_PORT = 43123
+AUTO_PROXY_PORT = 0
+PROXY_RUNTIME_VERSION = 1
 DEFAULT_STREAM_IDLE_TIMEOUT_MS = 1800000
 DEFAULT_STREAM_MAX_RETRIES = 20
 DEFAULT_REQUEST_MAX_RETRIES = 8
@@ -49,9 +52,148 @@ def get_codex_config_file() -> Path:
     return platform_support.get_codex_config_file()
 
 
+def get_runtime_proxy_file() -> Path:
+    return platform_support.get_proxy_runtime_file()
+
+
 def _load_config_file(path: Path) -> dict:
     platform_support.assert_secure_private_file(path)
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _normalize_proxy_host(value: str) -> str:
+    host = value.strip()
+    if not host:
+        raise ValueError("Proxy host cannot be empty")
+    return host
+
+
+def _normalize_proxy_port(value: str | int) -> int:
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Proxy port must be an integer") from exc
+    if port < 0 or port > 65535:
+        raise ValueError("Proxy port must be between 0 and 65535")
+    return port
+
+
+def _sanitize_proxy_runtime_state(data: dict) -> dict[str, int | str]:
+    version = data.get("version")
+    pid = data.get("pid")
+    host = data.get("host")
+    port = data.get("port")
+    if version != PROXY_RUNTIME_VERSION:
+        raise ValueError("Unsupported runtime state version")
+    if not isinstance(pid, int) or pid <= 0:
+        raise ValueError("Runtime state pid must be a positive integer")
+    if not isinstance(host, str):
+        raise ValueError("Runtime state host must be a string")
+    normalized_host = _normalize_proxy_host(host)
+    normalized_port = _normalize_proxy_port(port)
+    if normalized_port == 0:
+        raise ValueError("Runtime state port must be non-zero")
+    return {
+        "version": PROXY_RUNTIME_VERSION,
+        "pid": pid,
+        "host": normalized_host,
+        "port": normalized_port,
+    }
+
+
+def _format_url_host(host: str) -> str:
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+
+def get_effective_proxy_host() -> str:
+    env_value = os.environ.get("AZURE_OPENAI_PROXY_HOST")
+    if env_value:
+        return _normalize_proxy_host(env_value)
+    return DEFAULT_PROXY_HOST
+
+
+def get_effective_proxy_port() -> int:
+    env_value = os.environ.get("AZURE_OPENAI_PROXY_PORT")
+    if env_value is None:
+        return AUTO_PROXY_PORT
+    return _normalize_proxy_port(env_value)
+
+
+def get_fixed_proxy_port_override() -> int | None:
+    port = get_effective_proxy_port()
+    if port == AUTO_PROXY_PORT:
+        return None
+    return port
+
+
+def get_proxy_connect_host(host: str) -> str:
+    normalized_host = _normalize_proxy_host(host)
+    if normalized_host == "0.0.0.0":
+        return "127.0.0.1"
+    if normalized_host == "::":
+        return "::1"
+    return normalized_host
+
+
+def get_proxy_base_url(host: str, port: int) -> str:
+    normalized_port = _normalize_proxy_port(port)
+    if normalized_port == 0:
+        raise ValueError("Proxy base URL requires a non-zero port")
+    return f"http://{_format_url_host(get_proxy_connect_host(host))}:{normalized_port}/openai/v1"
+
+
+def get_proxy_health_url(host: str, port: int) -> str:
+    normalized_port = _normalize_proxy_port(port)
+    if normalized_port == 0:
+        raise ValueError("Proxy health URL requires a non-zero port")
+    return f"http://{_format_url_host(get_proxy_connect_host(host))}:{normalized_port}/healthz"
+
+
+def load_proxy_runtime_state() -> dict[str, int | str] | None:
+    path = get_runtime_proxy_file()
+    if not path.exists():
+        return None
+    try:
+        platform_support.assert_secure_private_file(path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Runtime state must be an object")
+        return _sanitize_proxy_runtime_state(data)
+    except (json.JSONDecodeError, OSError, ValueError):
+        path.unlink(missing_ok=True)
+        return None
+
+
+def save_proxy_runtime_state(*, pid: int, host: str, port: int) -> Path:
+    state = _sanitize_proxy_runtime_state(
+        {
+            "version": PROXY_RUNTIME_VERSION,
+            "pid": pid,
+            "host": get_proxy_connect_host(host),
+            "port": port,
+        }
+    )
+    path = get_runtime_proxy_file()
+    platform_support.write_private_text(path, json.dumps(state, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def clear_proxy_runtime_state() -> None:
+    get_runtime_proxy_file().unlink(missing_ok=True)
+
+
+def get_preferred_proxy_endpoint() -> tuple[str, int]:
+    runtime_state = load_proxy_runtime_state()
+    if runtime_state is not None:
+        return str(runtime_state["host"]), int(runtime_state["port"])
+
+    fixed_port = get_fixed_proxy_port_override()
+    if fixed_port is not None:
+        return get_proxy_connect_host(get_effective_proxy_host()), fixed_port
+
+    return get_proxy_connect_host(get_effective_proxy_host()), DEFAULT_PROXY_PORT
 
 
 def _iter_config_files() -> tuple[Path, ...]:
@@ -168,7 +310,7 @@ def ensure_local_auth_token() -> str:
     return token
 
 
-def update_codex_config(resource: str) -> Path:
+def update_codex_config(resource: str, proxy_base_url: str) -> Path:
     _normalize_resource(resource)
     token = ensure_local_auth_token()
     deployment = get_effective_deployment()
@@ -198,7 +340,7 @@ def update_codex_config(resource: str) -> Path:
 
     provider["name"] = CODEX_PROVIDER_NAME
     provider["env_key"] = CODEX_DUMMY_API_KEY_ENV
-    provider["base_url"] = DEFAULT_PROXY_BASE_URL
+    provider["base_url"] = proxy_base_url
     provider["wire_api"] = "responses"
     provider["query_params"] = {"api-version": "preview"}
     provider["stream_idle_timeout_ms"] = DEFAULT_STREAM_IDLE_TIMEOUT_MS

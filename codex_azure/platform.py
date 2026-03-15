@@ -39,6 +39,10 @@ def get_proxy_log_file() -> Path:
     return get_proxy_cache_dir() / f"{LEGACY_PROXY_BASENAME}.log"
 
 
+def get_proxy_runtime_file() -> Path:
+    return get_proxy_cache_dir() / f"{LEGACY_PROXY_BASENAME}.json"
+
+
 def get_legacy_proxy_config_file() -> Path:
     return Path.home() / ".config" / APP_NAME / "config.json"
 

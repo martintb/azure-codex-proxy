@@ -145,7 +145,7 @@ Optional settings:
 ```bash
 export AZURE_OPENAI_SCOPE="https://cognitiveservices.azure.com/.default"
 export AZURE_OPENAI_PROXY_HOST="127.0.0.1"
-export AZURE_OPENAI_PROXY_PORT="43123"
+export AZURE_OPENAI_PROXY_PORT="0"
 export AZURE_OPENAI_TOKEN_REFRESH_SKEW_SECONDS="300"
 ```
 
@@ -155,7 +155,7 @@ What they mean:
 - `AZURE_OPENAI_DEPLOYMENT`: the real Azure deployment name to send upstream
 - `AZURE_OPENAI_SCOPE`: Azure token scope, defaulting to Cognitive Services
 - `AZURE_OPENAI_PROXY_HOST`: local bind host for the proxy
-- `AZURE_OPENAI_PROXY_PORT`: local bind port for the proxy
+- `AZURE_OPENAI_PROXY_PORT`: local bind port for the proxy; use `0` or leave unset to auto-select a free port
 - `AZURE_OPENAI_TOKEN_REFRESH_SKEW_SECONDS`: how early to refresh a token before expiry
 
 ### Stored config commands
@@ -196,7 +196,7 @@ model_provider = "azure-openai-proxy"
 [model_providers.azure-openai-proxy]
 name = "azure-openai-proxy"
 env_key = "CODEX_AZURE_OPENAI_DUMMY_API_KEY"
-base_url = "http://127.0.0.1:43123/openai/v1"
+base_url = "http://127.0.0.1:<dynamic-port>/openai/v1"
 wire_api = "responses"
 query_params = { api-version = "preview" }
 stream_idle_timeout_ms = 1800000
@@ -228,11 +228,13 @@ If Azure CLI authentication is not available, the proxy can still fall back to a
 
 ## Local endpoints
 
-By default the proxy listens on:
+By default the proxy listens on `127.0.0.1` and asks the OS for any free port. `codex-azure` rewrites its provider `base_url` to the active endpoint each time it starts or restarts the proxy.
+
+If you need a fixed port, set `AZURE_OPENAI_PROXY_PORT` explicitly. The active endpoints look like:
 
 ```text
-http://127.0.0.1:43123/openai/v1/...
-http://127.0.0.1:43123/healthz
+http://127.0.0.1:<dynamic-port>/openai/v1/...
+http://127.0.0.1:<dynamic-port>/healthz
 ```
 
 The health endpoint returns whether the proxy can currently resolve configuration and obtain a valid token.
@@ -252,6 +254,10 @@ The health endpoint returns whether the proxy can currently resolve configuratio
   - Linux: `~/.cache/codex-azure/azure-openai-proxy.log`
   - macOS: `~/Library/Caches/codex-azure/azure-openai-proxy.log`
   - Windows: `%LOCALAPPDATA%\codex-azure\Cache\azure-openai-proxy.log`
+- Background proxy runtime state:
+  - Linux: `~/.cache/codex-azure/azure-openai-proxy.json`
+  - macOS: `~/Library/Caches/codex-azure/azure-openai-proxy.json`
+  - Windows: `%LOCALAPPDATA%\codex-azure\Cache\azure-openai-proxy.json`
 
 ## How request rewriting works
 
@@ -365,7 +371,7 @@ model_provider = "azure-openai-proxy"
 [model_providers.azure-openai-proxy]
 name = "azure-openai-proxy"
 env_key = "CODEX_AZURE_OPENAI_DUMMY_API_KEY"
-base_url = "http://127.0.0.1:43123/openai/v1"
+base_url = "http://127.0.0.1:<dynamic-port>/openai/v1"
 wire_api = "responses"
 query_params = { api-version = "preview" }
 stream_idle_timeout_ms = 1800000
@@ -394,7 +400,7 @@ Optional settings:
 export AZURE_OPENAI_SCOPE="https://cognitiveservices.azure.com/.default"
 export AZURE_OPENAI_DEPLOYMENT="gpt-5.4"
 export AZURE_OPENAI_PROXY_HOST="127.0.0.1"
-export AZURE_OPENAI_PROXY_PORT="43123"
+export AZURE_OPENAI_PROXY_PORT="0"
 export AZURE_OPENAI_TOKEN_REFRESH_SKEW_SECONDS="300"
 ```
 
@@ -406,11 +412,11 @@ codex-azure
 
 `codex-azure` checks whether the local proxy is already healthy, starts it in the background if needed, and then execs `codex` with any arguments you pass through.
 
-The proxy exposes:
+The proxy exposes a dynamically chosen local endpoint by default:
 
 ```text
-http://127.0.0.1:43123/openai/v1/...
-http://127.0.0.1:43123/healthz
+http://127.0.0.1:<dynamic-port>/openai/v1/...
+http://127.0.0.1:<dynamic-port>/healthz
 ```
 
 Authentication uses Azure CLI first and falls back to an interactive browser login.

@@ -16,6 +16,7 @@ def test_proxy_paths_use_platformdirs_locations(isolated_home, monkeypatch, load
     assert platform_module.get_proxy_config_file() == config_dir / "config.json"
     assert platform_module.get_proxy_pid_file() == cache_dir / "azure-openai-proxy.pid"
     assert platform_module.get_proxy_log_file() == cache_dir / "azure-openai-proxy.log"
+    assert platform_module.get_proxy_runtime_file() == cache_dir / "azure-openai-proxy.json"
 
 
 def test_load_config_reads_legacy_file_until_new_path_exists(isolated_home, monkeypatch, load_module):
