@@ -43,6 +43,22 @@ codex-azure config set-deployment gpt-5.4
 
 After the proxy is ready, `codex-azure` starts `codex` and passes through any extra arguments.
 
+## Requirements
+
+- Python 3.13+
+- `codex` installed and available on your `PATH`
+- Access to an Azure OpenAI resource and deployment
+- Azure CLI installed with `az login`, or the ability to complete an interactive browser login
+
+Package dependencies are installed automatically by `pip install git+https://github.com/tbm/azure-codex-proxy.git`:
+
+- `azure-identity`
+- `fastapi`
+- `httpx`
+- `tomlkit`
+- `uvicorn`
+
+
 ## What this does
 
 `codex-azure` exists to let `codex` talk to Azure OpenAI without requiring you to manually fetch and refresh Azure access tokens.
@@ -59,21 +75,6 @@ The proxy then:
 - refreshes tokens automatically before expiry
 - retries once on upstream `401` after forcing a token refresh
 - rewrites the local model alias to your real Azure deployment name before forwarding requests upstream
-
-## Requirements
-
-- Python 3.13+
-- `codex` installed and available on your `PATH`
-- Access to an Azure OpenAI resource and deployment
-- Azure CLI installed with `az login`, or the ability to complete an interactive browser login
-
-Package dependencies are installed automatically by `pip install git+https://github.com/tbm/azure-codex-proxy.git`:
-
-- `azure-identity`
-- `fastapi`
-- `httpx`
-- `tomlkit`
-- `uvicorn`
 
 ## Versioning
 
