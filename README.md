@@ -36,8 +36,8 @@ codex-azure
 
 On first run, if these are not already configured, `codex-azure` prompts for them and stores them in its per-user platform config directory:
 
-- Azure OpenAI resource URL (e.g., "https://<your-resource>.cognitiveservices.azure.com")
-- Azure OpenAI deployment name (e.g., "gpt-5.4")
+- Azure OpenAI resource URL (e.g., `"https://<your-resource>.cognitiveservices.azure.com"`)
+- Azure OpenAI deployment name (e.g., `"gpt-5.4"`)
 
 You can also set them explicitly with environment variables:
 
@@ -72,15 +72,6 @@ The proxy then:
 - refreshes tokens automatically before expiry
 - retries once on upstream `401` after forcing a token refresh
 - rewrites the local model alias to your real Azure deployment name before forwarding requests upstream
-
-## Versioning
-
-Package versions are derived from Git tags using Hatch VCS versioning.
-
-- Release tags should use a `v` prefix, for example `v0.1.0`.
-- Built package metadata resolves that tag to the semver version `0.1.0`.
-- Untagged commits build as development versions on the `0.1.0` line until a matching release tag exists.
-- If VCS metadata is unavailable entirely, builds fall back to `0.1.0`.
 
 ## Basic usage
 
