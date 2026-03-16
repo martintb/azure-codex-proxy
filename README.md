@@ -16,7 +16,7 @@ Supported platforms: Linux, macOS, and Windows.
 Install this package with `uv`:
 
 ```bash
-uv tool install git+https://github.com/martintb/azure-codex-proxy.git
+uv tool install git+https://github.com/martintb/azure-codex-proxy.git --prerelease=allow
 ```
 
 Then start Codex through the local Azure proxy:
@@ -49,7 +49,7 @@ export AZURE_OPENAI_DEPLOYMENT="gpt-5.4"
 Or store them once with config commands:
 
 ```bash
-codex-azure config set-resource https://<your-resource>.openai.azure.com
+codex-azure config set-resource https://<your-resource>.cognitiveservices.azure.com
 codex-azure config set-deployment gpt-5.4
 ```
 
