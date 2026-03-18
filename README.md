@@ -25,14 +25,13 @@ Then start Codex through the local Azure proxy:
 codex-azure
 ```
 
-If the above command fails during Azure authnetication because you are on a remote machine, in plain SSH, or in a VS Code terminal, authenticate Azure CLI in that same terminal first and then rerun codex-azure:
 
-```bash
-uv tool install azure-cli
-uv tool update-shell   # if needed, once
-az login --use-device-code
-codex-azure
-```
+> [!WARNING]
+> If you get an error `REQUESTS_CA_BUNDLE environment variable is specified with an invalid file path` try the following
+> ```bash
+> unset REQUESTS_CA_BUNDLE
+> codex-azure
+> ```
 
 On first run, if these are not already configured, `codex-azure` prompts for them and stores them in its per-user platform config directory:
 
@@ -55,6 +54,14 @@ codex-azure config set-deployment gpt-5.4
 
 After the proxy is ready, `codex-azure` starts `codex` and passes through extra arguments. Use `codex-azure run ...` when you need to force passthrough for flags or names that would otherwise belong to `codex-azure` itself.
 
+> [!NOTE]
+> If `codex-azure` fails during Azure authnetication, you can run the az login command directly after install
+> ```bash
+> uv tool install azure-cli
+> uv tool update-shell   # if needed, once
+> az login --use-device-code
+> codex-azure
+> ```
 
 ## What this does
 
