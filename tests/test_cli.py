@@ -122,6 +122,36 @@ def test_start_proxy_writes_pid_file_to_native_cache_dir(isolated_home, monkeypa
         assert kwargs["start_new_session"] is True
 
 
+def test_start_proxy_reuses_healthy_existing_proxy_without_spawning(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+    codex_config_calls = []
+    popen_calls = []
+
+    monkeypatch.setattr(cli, "_is_proxy_healthy", lambda host=None, port=None: True)
+    monkeypatch.setattr(cli, "_get_running_proxy_base_url", lambda: "http://127.0.0.1:51234/openai/v1")
+    monkeypatch.setattr(cli, "get_effective_resource", lambda: "https://myresource.openai.azure.com")
+    monkeypatch.setattr(
+        cli,
+        "_update_codex_proxy_config",
+        lambda resource, proxy_base_url=None: codex_config_calls.append((resource, proxy_base_url)),
+    )
+    monkeypatch.setattr(cli, "_ensure_resource", lambda: pytest.fail("should reuse the existing proxy"))
+    monkeypatch.setattr(cli, "_ensure_deployment", lambda: pytest.fail("should reuse the existing proxy"))
+    monkeypatch.setattr(cli, "_ensure_az_login", lambda: pytest.fail("should reuse the existing proxy"))
+    monkeypatch.setattr(
+        cli.subprocess,
+        "Popen",
+        lambda *args, **kwargs: popen_calls.append((args, kwargs)),
+    )
+
+    cli._start_proxy()
+
+    assert popen_calls == []
+    assert codex_config_calls == [
+        ("https://myresource.openai.azure.com", "http://127.0.0.1:51234/openai/v1")
+    ]
+
+
 def test_start_proxy_reports_auth_guidance_from_log(isolated_home, monkeypatch, load_module):
     cli = load_module("codex_azure.cli")
     log_file = cli.platform_support.get_proxy_log_file()
@@ -243,6 +273,18 @@ def test_stop_proxy_uses_taskkill_on_windows(isolated_home, monkeypatch, load_mo
 
     assert cli._stop_proxy_process(timeout_seconds=0.1) is True
     assert taskkill_calls == [(123, False), ("removed", None)]
+
+
+def test_restart_proxy_operates_on_shared_singleton(isolated_home, monkeypatch, load_module, capsys):
+    cli = load_module("codex_azure.cli")
+    calls = []
+
+    monkeypatch.setattr(cli, "_stop_proxy_process", lambda timeout_seconds=5.0: calls.append("stop") or True)
+    monkeypatch.setattr(cli, "_start_proxy", lambda: calls.append("start"))
+
+    assert cli._restart_proxy() == 0
+    assert calls == ["stop", "start"]
+    assert capsys.readouterr().out == "Restarted Azure OpenAI proxy.\n"
 
 
 def test_read_proxy_pid_prefers_runtime_state(isolated_home, monkeypatch, load_module):

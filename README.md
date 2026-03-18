@@ -89,17 +89,23 @@ codex-azure chat
 codex-azure <any other codex args>
 ```
 
+Multiple simultaneous `codex-azure` launches by the same user reuse the same background proxy. They do not start independent per-launch proxy daemons.
+
 Stop the background proxy:
 
 ```bash
 codex-azure stop-proxy
 ```
 
+`stop-proxy` stops that shared background proxy for the current user, which also affects any concurrent `codex` sessions using it.
+
 Restart the background proxy:
 
 ```bash
 codex-azure restart-proxy
 ```
+
+`restart-proxy` also operates on the shared singleton proxy rather than on an individual `codex-azure` invocation.
 
 Run only the proxy server without launching `codex`:
 
@@ -214,6 +220,8 @@ If `codex` is missing from `PATH`, `codex-azure` exits early with an install hin
 ## Local endpoints
 
 By default the proxy listens on `127.0.0.1` and asks the OS for any free port. `codex-azure` rewrites its provider `base_url` to the active endpoint each time it starts or restarts the proxy.
+
+For a given user account, that endpoint belongs to one shared background proxy. Starting `codex-azure` again while that proxy is healthy reuses it instead of launching a second proxy instance.
 
 If you need a fixed port, set `AZURE_OPENAI_PROXY_PORT` explicitly. The active endpoints look like:
 
@@ -396,6 +404,8 @@ codex-azure
 ```
 
 `codex-azure` checks whether the local proxy is already healthy, starts it in the background if needed, and then execs `codex` with any arguments you pass through.
+
+If you run `codex-azure` in multiple terminals as the same user, those sessions share the same background proxy and local proxy auth token.
 
 The proxy exposes a dynamically chosen local endpoint by default:
 
