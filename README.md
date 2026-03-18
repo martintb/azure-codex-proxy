@@ -53,7 +53,7 @@ codex-azure config set-resource https://<your-resource>.cognitiveservices.azure.
 codex-azure config set-deployment gpt-5.4
 ```
 
-After the proxy is ready, `codex-azure` starts `codex` and passes through any extra arguments.
+After the proxy is ready, `codex-azure` starts `codex` and passes through extra arguments. Use `codex-azure run ...` when you need to force passthrough for flags or names that would otherwise belong to `codex-azure` itself.
 
 
 ## What this does
@@ -84,10 +84,19 @@ codex-azure
 Pass arguments through to `codex`:
 
 ```bash
-codex-azure --help
 codex-azure chat
+codex-azure --model gpt-5.4
+codex-azure run --help
+codex-azure run config
 codex-azure <any other codex args>
 ```
+
+Command routing precedence:
+
+- `codex-azure --help` shows `codex-azure` help.
+- `codex-azure config ...`, `codex-azure stop-proxy`, and `codex-azure restart-proxy` stay reserved for the proxy CLI.
+- `codex-azure run ...` always passes everything after `run` to `codex`.
+- Any other first argument is passed through to `codex` directly.
 
 Multiple simultaneous `codex-azure` launches by the same user reuse the same background proxy. They do not start independent per-launch proxy daemons.
 
@@ -403,7 +412,7 @@ export AZURE_OPENAI_TOKEN_REFRESH_SKEW_SECONDS="300"
 codex-azure
 ```
 
-`codex-azure` checks whether the local proxy is already healthy, starts it in the background if needed, and then execs `codex` with any arguments you pass through.
+`codex-azure` checks whether the local proxy is already healthy, starts it in the background if needed, and then execs `codex` with any passthrough arguments. Use `codex-azure run ...` to forward names or flags that would otherwise be handled by `codex-azure`.
 
 If you run `codex-azure` in multiple terminals as the same user, those sessions share the same background proxy and local proxy auth token.
 

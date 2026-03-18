@@ -201,12 +201,23 @@ def test_start_proxy_reports_generic_log_error_when_unclassified(isolated_home, 
         cli._start_proxy()
 
 
+def test_get_codex_passthrough_args_distinguishes_internal_commands(isolated_home, load_module):
+    cli = load_module("codex_azure.cli")
+
+    assert cli._get_codex_passthrough_args([]) == []
+    assert cli._get_codex_passthrough_args(["chat"]) == ["chat"]
+    assert cli._get_codex_passthrough_args(["--model", "gpt-5.4"]) == ["--model", "gpt-5.4"]
+    assert cli._get_codex_passthrough_args(["run", "--help"]) == ["--help"]
+    assert cli._get_codex_passthrough_args(["config"]) is None
+    assert cli._get_codex_passthrough_args(["stop-proxy"]) is None
+    assert cli._get_codex_passthrough_args(["--help"]) is None
+
+
 def test_main_checks_for_codex_before_starting_proxy(isolated_home, monkeypatch, load_module):
     cli = load_module("codex_azure.cli")
-    parser = SimpleNamespace(parse_known_args=lambda: (SimpleNamespace(command=None, handler=None), []))
     start_calls = []
 
-    monkeypatch.setattr(cli, "_build_parser", lambda: parser)
+    monkeypatch.setattr(cli.sys, "argv", ["codex-azure", "chat"])
     monkeypatch.setattr(cli, "_ensure_codex_installed", lambda: (_ for _ in ()).throw(RuntimeError("missing codex")))
     monkeypatch.setattr(cli, "_start_proxy", lambda: start_calls.append("started"))
 
@@ -215,6 +226,65 @@ def test_main_checks_for_codex_before_starting_proxy(isolated_home, monkeypatch,
 
     assert excinfo.value.code == 1
     assert start_calls == []
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected_codex_args"),
+    [
+        ([], []),
+        (["chat"], ["chat"]),
+        (["--model", "gpt-5.4"], ["--model", "gpt-5.4"]),
+        (["run", "--help"], ["--help"]),
+        (["run", "config"], ["config"]),
+    ],
+)
+def test_main_passes_codex_args_through(isolated_home, monkeypatch, load_module, argv, expected_codex_args):
+    cli = load_module("codex_azure.cli")
+    calls = []
+
+    monkeypatch.setattr(cli.sys, "argv", ["codex-azure", *argv])
+    monkeypatch.setattr(cli, "_ensure_codex_installed", lambda: calls.append("ensure"))
+    monkeypatch.setattr(cli, "_start_proxy", lambda: calls.append("start"))
+    monkeypatch.setattr(cli, "ensure_local_auth_token", lambda: "secret")
+    monkeypatch.setattr(cli, "_launch_codex", lambda args: calls.append(("launch", args)))
+
+    cli.main()
+
+    assert calls == ["ensure", "start", ("launch", expected_codex_args)]
+
+
+def test_main_routes_internal_config_command_without_launching_codex(isolated_home, monkeypatch, load_module):
+    cli = load_module("codex_azure.cli")
+    calls = []
+
+    monkeypatch.setattr(cli.sys, "argv", ["codex-azure", "config", "show-resource"])
+    monkeypatch.setattr(cli, "_print_resource", lambda: calls.append("show-resource") or 0)
+    monkeypatch.setattr(cli, "_ensure_codex_installed", lambda: calls.append("ensure"))
+    monkeypatch.setattr(cli, "_start_proxy", lambda: calls.append("start"))
+    monkeypatch.setattr(cli, "_launch_codex", lambda args: calls.append(("launch", args)))
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main()
+
+    assert excinfo.value.code == 0
+    assert calls == ["show-resource"]
+
+
+def test_main_shows_top_level_help_without_launching_codex(isolated_home, monkeypatch, load_module, capsys):
+    cli = load_module("codex_azure.cli")
+    calls = []
+
+    monkeypatch.setattr(cli.sys, "argv", ["codex-azure", "--help"])
+    monkeypatch.setattr(cli, "_ensure_codex_installed", lambda: calls.append("ensure"))
+    monkeypatch.setattr(cli, "_start_proxy", lambda: calls.append("start"))
+    monkeypatch.setattr(cli, "_launch_codex", lambda args: calls.append(("launch", args)))
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main()
+
+    assert excinfo.value.code == 0
+    assert "Start the Azure token-refreshing proxy and then launch codex." in capsys.readouterr().out
+    assert calls == []
 
 
 def test_launch_codex_execs_on_posix(isolated_home, monkeypatch, load_module):

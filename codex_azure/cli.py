@@ -34,6 +34,8 @@ from . import platform as platform_support
 CODEX_INSTALL_URL = "https://developers.openai.com/codex/cli"
 CODEX_INSTALL_COMMAND = "npm i -g @openai/codex"
 PROXY_LOG_TAIL_BYTES = 8192
+INTERNAL_COMMANDS = frozenset({"config", "stop-proxy", "restart-proxy"})
+HELP_FLAGS = frozenset({"-h", "--help"})
 
 
 def _get_preferred_proxy_base_url() -> str:
@@ -382,6 +384,18 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _get_codex_passthrough_args(argv: list[str]) -> list[str] | None:
+    if not argv:
+        return []
+
+    first = argv[0]
+    if first in HELP_FLAGS or first in INTERNAL_COMMANDS:
+        return None
+    if first == "run":
+        return argv[1:]
+    return argv
+
+
 def _has_command(command: str) -> bool:
     return shutil.which(command) is not None
 
@@ -564,21 +578,24 @@ def _launch_codex(args: list[str]) -> None:
 
 
 def main() -> None:
-    parser = _build_parser()
-    args, remaining = parser.parse_known_args()
+    argv = sys.argv[1:]
+    codex_args = _get_codex_passthrough_args(argv)
     try:
-        if getattr(args, "handler", None) is not None:
-            raise SystemExit(args.handler(args))
-
-        if args.command is not None:
-            parser.print_help(sys.stderr)
-            raise SystemExit(2)
+        if codex_args is None:
+            parser = _build_parser()
+            args, remaining = parser.parse_known_args(argv)
+            if getattr(args, "handler", None) is not None:
+                raise SystemExit(args.handler(args))
+            if args.command is not None:
+                parser.print_help(sys.stderr)
+                raise SystemExit(2)
+            codex_args = remaining
 
         _ensure_codex_installed()
         _start_proxy()
         os.environ.setdefault(CODEX_DUMMY_API_KEY_ENV, CODEX_DUMMY_API_KEY_VALUE)
         os.environ.setdefault(CODEX_LOCAL_AUTH_ENV, ensure_local_auth_token())
-        _launch_codex(remaining)
+        _launch_codex(codex_args)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from None
